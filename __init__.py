@@ -7,11 +7,12 @@ from datetime import datetime
 
 from homeassistant.const import Platform
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.util import dt as dt_util
 
 from .availability import AvailabilityTracker
-from .const import CONF_COOKS, CONF_SETTINGS
+from .const import CONF_COOKS, CONF_SETTINGS, DOMAIN
 from .models import Cook, Settings
 from .planner import Planner
 from .runtime import DinnerSenseConfigEntry, DinnerSenseData
@@ -20,6 +21,8 @@ from .store import HouseholdStore
 from .tips import TipsManager
 
 _LOGGER = logging.getLogger(__name__)
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 PLATFORMS = [
     Platform.BUTTON,

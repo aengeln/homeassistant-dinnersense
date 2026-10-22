@@ -13,6 +13,7 @@ python_version = "3.13"
 strict = true
 files = ["rotation"]
 follow_imports = "silent"
+explicit_package_bases = true
 
 [tool.ruff.lint.isort]
 known-first-party = ["homeassistant", "custom_components"]

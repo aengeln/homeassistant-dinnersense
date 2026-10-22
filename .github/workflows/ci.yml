@@ -1,11 +1,17 @@
 name: CI
 on: [push, pull_request]
+
 jobs:
   hassfest:
     runs-on: ubuntu-latest
     steps:
+      # hassfest and the tests expect custom_components/<domain>/, but this repo keeps
+      # the integration in its root (hacs.json: content_in_root), so check out into place.
       - uses: actions/checkout@v4
+        with:
+          path: custom_components/dinnersense
       - uses: home-assistant/actions/hassfest@master
+
   hacs:
     runs-on: ubuntu-latest
     steps:
@@ -13,13 +19,19 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
+
   test:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: custom_components/dinnersense
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: custom_components/dinnersense
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.14"
       - run: pip install pytest-homeassistant-custom-component ruff mypy
       - run: ruff check .
       - run: mypy
