@@ -6,6 +6,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
+import voluptuous as vol
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_capture_events,
@@ -394,6 +395,7 @@ def _fake_ai(hass, answer=None, error=None):
     hass.services.async_register(
         "ai_task", "generate_data", handler, supports_response=SupportsResponse.ONLY
     )
+    hass.states.async_set("ai_task.fake", "unknown")
     return calls
 
 
@@ -497,3 +499,64 @@ async def test_get_stats_service(hass, entry, freezer) -> None:
         DOMAIN, "get_stats", {"period": 7}, blocking=True, return_response=True
     )
     assert not any(r["name"] == "Burgers" for r in short["dishes"])
+
+
+async def _tips_with_ai_setup(hass, freezer, prepare):
+    """Set up a household whose AI Task misbehaves in some way; return tips response."""
+    freezer.move_to(NOW)
+    prepare()
+    entry = await _entry_with_ai(hass)
+    await _setup(hass, entry)
+    await _burger_history(hass)
+    return await hass.services.async_call(
+        DOMAIN, "generate_tips", {}, blocking=True, return_response=True
+    )
+
+
+async def test_ai_task_entity_configured_but_integration_missing(hass, freezer) -> None:
+    # No ai_task service and no entity at all (e.g. the AI integration was removed).
+    resp = await _tips_with_ai_setup(hass, freezer, lambda: None)
+    assert resp["source"] == "rules" and "No Burgers for 15 days" in resp["tips"]
+
+
+async def test_ai_task_entity_unavailable_is_not_called(hass, freezer) -> None:
+    calls = []
+
+    def prepare():
+        calls.extend(_fake_ai(hass, {"tips": ["x"]}))
+        hass.states.async_set("ai_task.fake", "unavailable")
+
+    resp = await _tips_with_ai_setup(hass, freezer, prepare)
+    assert resp["source"] == "rules" and calls == []
+
+
+async def test_ai_task_unexpected_errors_never_break_tips(hass, freezer) -> None:
+    for error in (RuntimeError("boom"), vol.Invalid("bad"), KeyError("x")):
+        hass.services.async_remove("ai_task", "generate_data")
+        resp = await _tips_with_ai_setup(
+            hass, freezer, lambda error=error: _fake_ai(hass, error=error)
+        )
+        assert resp["source"] == "rules" and resp["tips"]
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            await hass.config_entries.async_remove(entry.entry_id)
+        await hass.async_block_till_done()
+
+
+async def test_garbage_ai_answers_fall_back(hass, freezer) -> None:
+    for answer in (None, {"tips": []}, {"tips": [42]}, "", {"other": 1}):
+        hass.services.async_remove("ai_task", "generate_data")
+        resp = await _tips_with_ai_setup(
+            hass, freezer, lambda answer=answer: _fake_ai(hass, answer)
+        )
+        assert resp["source"] == "rules"
+        for entry in hass.config_entries.async_entries(DOMAIN):
+            await hass.config_entries.async_remove(entry.entry_id)
+        await hass.async_block_till_done()
+
+
+async def test_household_works_with_no_ai_task_at_all(hass, entry, freezer) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    assert entry.options["settings"]["ai_task_entity"] is None
+    assert hass.states.get("sensor.test_household_dinner_tips") is not None
+    assert hass.states.get("sensor.test_household_dinner_today").state == "Ann"

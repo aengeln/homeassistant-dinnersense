@@ -14,7 +14,6 @@ import re
 from typing import Any
 
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_call_later
 from homeassistant.util import dt as dt_util
 
@@ -267,6 +266,7 @@ class TipsManager:
         self._listeners: list[CALLBACK_TYPE] = []
         self._cancel_debounce: CALLBACK_TYPE | None = None
         self._lock = asyncio.Lock()
+        self._ai_failing = False
 
     def add_listener(self, listener: CALLBACK_TYPE) -> CALLBACK_TYPE:
         self._listeners.append(listener)
@@ -319,18 +319,23 @@ class TipsManager:
         )
 
     async def async_refresh(self) -> list[dict[str, str]]:
+        """Refresh the tips. Never raises: tips are a nice-to-have, not core."""
         async with self._lock:
-            language = self.hass.config.language
-            stats = self.stats()
-            tips: list[dict[str, str]] | None = None
-            source = "rules"
-            entity_id = self.planner.settings.ai_task_entity
-            if entity_id:
-                tips = await self._llm_tips(entity_id, stats, language)
-                if tips:
-                    source = "llm"
-            if not tips:
-                tips = rule_tips(stats, language)
+            try:
+                language = self.hass.config.language
+                stats = self.stats()
+                tips: list[dict[str, str]] | None = None
+                source = "rules"
+                entity_id = self.planner.settings.ai_task_entity
+                if entity_id:
+                    tips = await self._llm_tips(entity_id, stats, language)
+                    if tips:
+                        source = "llm"
+                if not tips:
+                    tips = rule_tips(stats, language)
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("Could not refresh dinner tips")
+                return self.tips
             self.tips, self.source = tips, source
             self.generated_at = dt_util.utcnow().isoformat()
             for listener in list(self._listeners):
@@ -340,8 +345,18 @@ class TipsManager:
     async def _llm_tips(
         self, entity_id: str, stats: dict[str, Any], language: str
     ) -> list[dict[str, str]] | None:
+        """Phrase tips with the AI Task, or None to use the rule-based ones.
+
+        The AI Task is optional: a missing, removed, unavailable or failing
+        entity just means rule-based tips. Only the first failure is logged
+        loudly, so a permanently broken setup does not flood the log.
+        """
         facts = facts_for_llm(stats, language)
         if not has_facts(facts):
+            return None
+        state = self.hass.states.get(entity_id)
+        if state is None or state.state == "unavailable":
+            self._note_ai_failure(f"{entity_id} is not available")
             return None
         try:
             async with asyncio.timeout(AI_TIMEOUT):
@@ -363,8 +378,17 @@ class TipsManager:
                     blocking=True,
                     return_response=True,
                 )
-        except (HomeAssistantError, TimeoutError, ValueError, TypeError) as err:
-            _LOGGER.warning("AI Task failed, using rule-based tips: %s", err)
+        except Exception as err:  # noqa: BLE001 - any AI failure means "use rules"
+            self._note_ai_failure(f"{type(err).__name__}: {err}")
             return None
         texts = clean_llm_tips((result or {}).get("data"), facts)
-        return [{"kind": "llm", "text": t} for t in texts] or None
+        if not texts:
+            self._note_ai_failure("the answer had no usable tips")
+            return None
+        self._ai_failing = False
+        return [{"kind": "llm", "text": t} for t in texts]
+
+    def _note_ai_failure(self, reason: str) -> None:
+        log = _LOGGER.debug if self._ai_failing else _LOGGER.warning
+        log("AI Task not used for dinner tips (%s); using rule-based tips", reason)
+        self._ai_failing = True
