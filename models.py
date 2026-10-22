@@ -138,6 +138,9 @@ class Settings:
     auto_create_dishes: bool = False
     ai_task_entity: str | None = None
     todo_entity: str | None = None
+    # After this time of day, tonight is fixed: no swapping it, and rebuilds
+    # (live sensors, availability) leave its cook alone. None = never fixed.
+    tonight_fixed_from: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.__dict__)

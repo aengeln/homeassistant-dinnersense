@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Callable
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -134,29 +134,40 @@ class Planner:
 
     # -- roll / generation -------------------------------------------------------
 
-    def roll(self, today: date) -> None:
-        """Close out the past, then fill the horizon. Never deletes history."""
+    def roll(self, today: date, *, announce: bool = False) -> None:
+        """Close out the past, then fill the horizon. Never deletes history.
+
+        ``dinnersense_rolled`` fires when something was closed or added, or when
+        ``announce`` is set (the scheduled nightly roll always announces). A
+        plain restart with nothing to do is silent and writes nothing.
+        """
         closed = 0
-        self._lock_menu_days(today)
+        locked = self._lock_menu_days(today)
         for day, dinner in self.dinners.items():
             if day < today and dinner.status == STATUS_PLANNED:
                 self._set_status(dinner, self.settings.unconfirmed_past, "roll")
                 closed += 1
         added = self._fill(today)
-        self._commit(
-            [
-                (
-                    EVENT_ROLLED,
-                    {"date": today.isoformat(), "closed": closed, "added": added},
-                )
-            ]
-        )
+        if closed or added or announce:
+            self._commit(
+                [
+                    (
+                        EVENT_ROLLED,
+                        {"date": today.isoformat(), "closed": closed, "added": added},
+                    )
+                ]
+            )
+        elif locked:
+            self._commit([])
         self._check_conflicts(today)
 
     def regenerate(self, today: date) -> None:
         """Rebuild unlocked future planned dinners (menus are kept)."""
-        rebuilt = self._rebuild_future(today)
-        self._commit([(EVENT_CHANGED, {"reason": "regenerate", "rebuilt": rebuilt})])
+        changed = self._rebuild_future(today)
+        if changed:
+            self._commit(
+                [(EVENT_CHANGED, {"reason": "regenerate", "rebuilt": changed})]
+            )
         self._check_conflicts(today)
 
     def _fill(self, today: date) -> int:
@@ -188,18 +199,24 @@ class Planner:
     def _rebuild_future(self, today: date) -> int:
         """Reassign cooks on unlocked future dinners, keeping ids, menus, history.
 
-        Locked dinners whose cook no longer exists are rebuilt too. Debt is
-        reset to what it was before today so it isn't counted twice.
+        Locked dinners whose cook no longer exists are rebuilt too, and tonight
+        is left alone once it is fixed (see ``tonight_fixed``). Debt is reset to
+        what it was before today so it isn't counted twice. Returns how many
+        dinners really changed (a different cook, or added or dropped).
         """
         known = {c.id for c in self.cooks}
         self._lock_menu_days(today)
+        fixed_tonight = self.tonight_fixed()
         old = {
             d: v
             for d, v in self.dinners.items()
             if d >= today
+            and not (d == today and fixed_tonight and v.cook in known)
             and v.status == STATUS_PLANNED
             and (not v.locked or v.cook not in known)
         }
+        before = set(self.dinners)
+        was = {d: (v.cook, v.repay) for d, v in old.items()}
         for day in old:
             del self.dinners[day]
         self.debt = {k: v for k, v in self._debt_base(today).items() if k in known}
@@ -219,13 +236,22 @@ class Planner:
             previous.cook, previous.repay = new.cook, new.repay
             previous.debt_after, previous.locked = new.debt_after, False
             self.dinners[day] = previous
-        return len(old)
+        changed = len(set(self.dinners) - before) + len(before - set(self.dinners))
+        changed += sum(
+            1
+            for d, was_cook in was.items()
+            if d in self.dinners
+            and (self.dinners[d].cook, self.dinners[d].repay) != was_cook
+        )
+        return changed
 
-    def _lock_menu_days(self, today: date) -> None:
+    def _lock_menu_days(self, today: date) -> int:
         """A day with a real menu keeps its cook: a human has decided what is cooked.
 
         Idempotent, and also covers menus saved before this rule existed.
+        Returns how many days it locked.
         """
+        count = 0
         for day, dinner in self.dinners.items():
             if (
                 day >= today
@@ -237,6 +263,24 @@ class Planner:
                 dinner.history.append(
                     ChangeRecord(self._stamp(), "locked", {"reason": "menu"})
                 )
+                count += 1
+        return count
+
+    # -- tonight ---------------------------------------------------------------------
+
+    def _cutoff(self) -> time | None:
+        value = self.settings.tonight_fixed_from
+        if not value:
+            return None
+        try:
+            return time.fromisoformat(value)
+        except ValueError:
+            return None
+
+    def tonight_fixed(self) -> bool:
+        """True once the cut-off time has passed today (if one is set)."""
+        cutoff = self._cutoff()
+        return cutoff is not None and self._now().time() >= cutoff
 
     def _debt_base(self, today: date) -> dict[str, int]:
         past = [
@@ -254,7 +298,7 @@ class Planner:
         if end < start:
             raise PlannerError("end must not be before start")
         self.manual_windows.append(AvailabilityWindow(cook_id, start, end))
-        self._availability_changed(today)
+        self._availability_changed(today, persist=True)
 
     def clear_unavailable(
         self,
@@ -273,7 +317,7 @@ class Planner:
             or (start is not None and w.end < start)
             or (end is not None and w.start > end)
         ]
-        self._availability_changed(today)
+        self._availability_changed(today, persist=True)
 
     def set_external_windows(
         self, windows: list[AvailabilityWindow], today: date
@@ -286,11 +330,22 @@ class Planner:
         if key(windows) == key(self.external_windows):
             return
         self.external_windows = list(windows)
-        self._availability_changed(today)
+        self._availability_changed(today, persist=False)
 
-    def _availability_changed(self, today: date) -> None:
-        rebuilt = self._rebuild_future(today)
-        self._commit([(EVENT_CHANGED, {"reason": "availability", "rebuilt": rebuilt})])
+    def _availability_changed(self, today: date, *, persist: bool) -> None:
+        """Rebuild after availability moved. Events and writes only if it mattered.
+
+        Manual windows are saved data, so they always persist; windows derived
+        from calendars and helpers are not saved, so a rebuild that changes
+        nothing (the usual case at boot) is silent.
+        """
+        changed = self._rebuild_future(today)
+        if changed:
+            self._commit(
+                [(EVENT_CHANGED, {"reason": "availability", "rebuilt": changed})]
+            )
+        elif persist:
+            self._commit([])
         self._check_conflicts(today)
 
     def _check_conflicts(self, today: date) -> None:
@@ -302,7 +357,7 @@ class Planner:
             for d in self.dinners.values()
             if d.date >= today
             and d.status == STATUS_PLANNED
-            and d.locked
+            and (d.locked or (d.date == today and self.tonight_fixed()))
             and d.cook in known
             and not engine.is_available(d.cook, d.date)
         }
@@ -349,7 +404,17 @@ class Planner:
     # -- user actions ------------------------------------------------------------
 
     def swap(self, day: date, cook_id: str, today: date) -> None:
+        """Give ``day`` to ``cook_id``; they hand over their next day after today.
+
+        Tonight is never pulled in as the partner day, and tonight itself can't
+        be swapped once it is fixed (``tonight_fixed_from``).
+        """
         dinner = self._require_planned(day)
+        if day == today and self.tonight_fixed():
+            raise PlannerError(
+                f"Tonight is fixed after {self._cutoff():%H:%M}; "
+                "use reassign to correct it"
+            )
         try:
             result = self.engine.swap(
                 _to_plan(self.dinners),
@@ -363,6 +428,7 @@ class Planner:
                     if a.date in self.dinners
                     else True
                 ),
+                earliest_partner=today + timedelta(days=1),
             )
         except PastDinner as err:
             raise PlannerError(str(err)) from err
@@ -387,7 +453,13 @@ class Planner:
         )
         dinner.locked = partner.locked = True
         dinner.repay = partner.repay = False
-        if self.settings.menu_follows_cook:
+        # Dishes follow the cook. Eating out, leftovers and "no dinner" belong to
+        # the date, so if either day has one, no menu moves.
+        if (
+            self.settings.menu_follows_cook
+            and _menu_can_move(dinner.menu)
+            and _menu_can_move(partner.menu)
+        ):
             dinner.menu, partner.menu = partner.menu, dinner.menu
         after = [_snapshot(dinner), _snapshot(partner)]
         for d, b in zip((dinner, partner), before, strict=True):
@@ -691,6 +763,11 @@ class Planner:
         self.notify()
         for name, data in events:
             self._fire(name, data)
+
+
+def _menu_can_move(menu: MenuEntry | None) -> bool:
+    """Only an ordinary home-cooked menu (or none) follows a cook to another date."""
+    return menu is None or menu.kind == "home"
 
 
 def _has_menu(dinner: Dinner) -> bool:

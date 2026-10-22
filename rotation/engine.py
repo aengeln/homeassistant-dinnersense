@@ -147,11 +147,13 @@ class RotationEngine:
         horizon_days: int,
         debt: Debt | None = None,
         swappable: Callable[[Assignment], bool] | None = None,
+        earliest_partner: date | None = None,
     ) -> SwapResult:
         """Give ``day`` to ``cook_id`` and hand that cook's next day to the old cook.
 
         ``swappable`` filters which of the cook's days may be the partner day
-        (e.g. only still-planned dinners).
+        (e.g. only still-planned dinners). The partner day is never before
+        ``earliest_partner`` (default: today), so a caller can keep tonight out.
         """
         self._require_cook(cook_id)
         if day not in plan:
@@ -164,13 +166,17 @@ class RotationEngine:
             return SwapResult(dict(plan), False, day, None, new_debt)
 
         new_plan: Plan = dict(plan)
-        partner = self._next_day_of(new_plan, cook_id, today, day, swappable)
+        partner = self._next_day_of(
+            new_plan, cook_id, earliest_partner or today, day, swappable
+        )
         span = horizon_days
         while partner is None and span < MAX_SWAP_EXTENSION_DAYS:
             span = min(span + 7, MAX_SWAP_EXTENSION_DAYS)
             generated = self.generate(new_plan, today, span, new_debt)
             new_plan, new_debt = generated.plan, generated.debt
-            partner = self._next_day_of(new_plan, cook_id, today, day, swappable)
+            partner = self._next_day_of(
+                new_plan, cook_id, earliest_partner or today, day, swappable
+            )
         if partner is None:
             raise NoUpcomingDinner(f"{cook_id} has no upcoming dinner to swap with")
 
@@ -198,7 +204,7 @@ class RotationEngine:
     def _next_day_of(
         plan: Plan,
         cook_id: str,
-        today: date,
+        earliest: date,
         exclude: date,
         swappable: Callable[[Assignment], bool] | None,
     ) -> date | None:
@@ -206,7 +212,7 @@ class RotationEngine:
             d
             for d, a in plan.items()
             if a.cook_id == cook_id
-            and d >= today
+            and d >= earliest
             and d != exclude
             and (swappable is None or swappable(a))
         ]

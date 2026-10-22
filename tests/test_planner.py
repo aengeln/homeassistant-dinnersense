@@ -650,3 +650,173 @@ def test_past_menus_do_not_matter_for_rebuilds():
     h.planner.set_menu(days(0), days(3), title="Old")
     h.planner.regenerate(days(3))
     assert h.planner.dinners[days(0)].menu.title == "Old"
+
+
+# -- #1 tonight is never dragged into a swap -------------------------------------------
+
+
+def test_swap_never_uses_tonight_as_the_partner_day():
+    h = Harness()
+    h.planner.roll(TODAY)  # ann bob cy ann bob cy ann bob cy ann
+    # Day 3 is Ann's; Ann also cooks tonight (day 0). Swap day 3 to Bob: Bob's next
+    # day is day 1 (tomorrow), fine. Swap day 4 (Bob's) to Ann: Ann's next day is
+    # TONIGHT (day 0), which must not be used; the next one is day 3.
+    h.planner.swap(days(4), "ann", TODAY)
+    assert h.planner.dinners[days(0)].cook == "ann"  # tonight untouched
+    assert not h.planner.dinners[days(0)].locked
+    assert h.planner.dinners[days(4)].cook == "ann"
+    assert h.planner.dinners[days(3)].cook == "bob"  # the partner was day 3, not day 0
+
+
+def test_swapping_tonight_itself_is_allowed_and_partner_is_in_the_future():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.swap(TODAY, "cy", TODAY)  # Ann's tonight to Cy
+    assert h.planner.dinners[TODAY].cook == "cy"
+    assert h.planner.dinners[days(2)].cook == "ann"  # Cy's next day, after tonight
+
+
+def test_tonight_cannot_be_swapped_after_the_cutoff():
+    h = Harness(tonight_fixed_from="09:00")  # the harness clock says 12:00
+    h.planner.roll(TODAY)
+    with pytest.raises(planner_mod.PlannerError, match="fixed after 09:00"):
+        h.planner.swap(TODAY, "cy", TODAY)
+    h.planner.swap(days(1), "cy", TODAY)  # other days are unaffected
+    h.planner.reassign(TODAY, "cy")  # correcting tonight is still possible
+    assert h.planner.dinners[TODAY].cook == "cy"
+
+
+def test_tonight_can_be_swapped_before_the_cutoff():
+    h = Harness(tonight_fixed_from="15:00")
+    h.planner.roll(TODAY)
+    h.planner.swap(TODAY, "cy", TODAY)
+    assert h.planner.dinners[TODAY].cook == "cy"
+
+
+def test_invalid_cutoff_is_ignored():
+    h = Harness(tonight_fixed_from="soon")
+    h.planner.roll(TODAY)
+    assert not h.planner.tonight_fixed()
+
+
+# -- #2 date-bound menus stay on their date --------------------------------------------
+
+
+def test_dishes_follow_the_cook_but_date_bound_menus_stay():
+    for kind in ("eating_out", "leftovers", "skip"):
+        h = Harness()
+        h.planner.roll(TODAY)
+        h.planner.set_menu(days(3), TODAY, title="Tacos")  # Ann's day: a dish
+        h.planner.set_menu(days(2), TODAY, kind=kind)  # Cy's day: date-bound
+        h.planner.swap(days(3), "cy", TODAY)
+        assert h.planner.dinners[days(3)].cook == "cy"
+        assert h.planner.dinners[days(2)].cook == "ann"
+        assert h.planner.dinners[days(3)].menu.title == "Tacos"  # did not move
+        assert h.planner.dinners[days(2)].menu.kind == kind  # stayed on its date
+
+
+def test_two_dishes_still_swap_with_their_cooks():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.set_menu(days(3), TODAY, title="Tacos")
+    h.planner.set_menu(days(2), TODAY, title="Soup")
+    h.planner.swap(days(3), "cy", TODAY)
+    assert h.planner.dinners[days(3)].menu.title == "Soup"
+    assert h.planner.dinners[days(2)].menu.title == "Tacos"
+
+
+def test_date_bound_menu_on_the_requested_day_also_stays():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.set_menu(days(3), TODAY, kind="eating_out", going_out=["ann"])
+    h.planner.set_menu(days(2), TODAY, title="Soup")
+    h.planner.swap(days(3), "cy", TODAY)
+    assert h.planner.dinners[days(3)].menu.kind == "eating_out"
+    assert h.planner.dinners[days(3)].menu.going_out == ["ann"]
+    assert h.planner.dinners[days(2)].menu.title == "Soup"
+
+
+# -- #4 a live sensor can't change tonight's cook after the cutoff -------------------------
+
+
+def test_after_the_cutoff_availability_leaves_tonights_cook_alone():
+    h = Harness(tonight_fixed_from="09:00")
+    h.planner.roll(TODAY)
+    h.planner.set_external_windows(
+        [planner_mod.AvailabilityWindow("ann", TODAY, TODAY)], TODAY
+    )
+    assert h.planner.dinners[TODAY].cook == "ann"  # fixed
+    assert [c["date"] for c in conflicts(h)] == [TODAY.isoformat()]  # told instead
+
+
+def test_before_the_cutoff_availability_may_change_tonight():
+    h = Harness(tonight_fixed_from="15:00")
+    h.planner.roll(TODAY)
+    h.planner.set_external_windows(
+        [planner_mod.AvailabilityWindow("ann", TODAY, TODAY)], TODAY
+    )
+    assert h.planner.dinners[TODAY].cook != "ann"
+    assert conflicts(h) == []
+
+
+def test_without_a_cutoff_behaviour_is_unchanged():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.set_external_windows(
+        [planner_mod.AvailabilityWindow("ann", TODAY, TODAY)], TODAY
+    )
+    assert h.planner.dinners[TODAY].cook != "ann"
+
+
+# -- #5 restarts are quiet when nothing changed -------------------------------------------
+
+
+def test_a_restart_with_nothing_to_do_fires_nothing_and_writes_nothing():
+    h = Harness()
+    h.planner.roll(TODAY)
+    events, saves = len(h.events), h.saves
+    h.planner.roll(TODAY)  # as at startup
+    h.planner.set_external_windows([], TODAY)
+    h.planner.regenerate(TODAY)
+    assert (len(h.events), h.saves) == (events, saves)
+
+
+def test_the_nightly_roll_always_announces():
+    h = Harness()
+    h.planner.roll(TODAY)
+    events = len(h.events)
+    h.planner.roll(TODAY, announce=True)
+    assert [n for n, _ in h.events[events:]] == ["dinnersense_rolled"]
+
+
+def test_a_restart_after_downtime_announces_what_it_did():
+    h = Harness()
+    h.planner.roll(TODAY)
+    events = len(h.events)
+    h.planner.roll(days(2))  # closed two days, added two
+    ev = h.events[events:]
+    assert [n for n, _ in ev] == ["dinnersense_rolled"]
+    assert ev[0][1]["closed"] == 2 and ev[0][1]["added"] == 2
+
+
+def test_availability_that_changes_nothing_is_silent_but_manual_windows_persist():
+    h = Harness()
+    h.planner.roll(TODAY)
+    events, saves = len(h.events), h.saves
+    # An external window for a cook with no dinners in range changes no cook.
+    h.planner.set_external_windows(
+        [planner_mod.AvailabilityWindow("ann", days(-9), days(-5))], TODAY
+    )
+    assert (len(h.events), h.saves) == (events, saves)
+    h.planner.add_unavailable("ann", days(-9), days(-5), TODAY)
+    assert h.saves == saves + 1  # the manual window is saved data
+    assert len(h.events) == events  # but nothing changed, so no event
+
+
+def test_a_real_change_still_fires_changed_with_a_count():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.add_unavailable("bob", days(0), days(3), TODAY)
+    name, data = h.events[-1]
+    assert name == "dinnersense_changed" and data["reason"] == "availability"
+    assert data["rebuilt"] >= 1

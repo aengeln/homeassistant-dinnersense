@@ -33,7 +33,11 @@
           "menu_follows_cook": "Menyn följer kocken vid byte",
           "unconfirmed_past": "Obekräftade tidigare middagar räknas som",
           "ai_task_entity": "AI-uppgift för tips (valfritt)",
-          "todo_entity": "Inköpslista (valfritt)"
+          "todo_entity": "Inköpslista (valfritt)",
+          "tonight_fixed_from": "Kvällens middag låses från (valfritt)"
+        },
+        "data_description": {
+          "tonight_fixed_from": "Efter denna tid kan kvällens middag inte bytas, och sensorer eller ändrad tillgänglighet ändrar inte kvällens kock (du får ett meddelande i stället). Lämna tomt för att aldrig låsa. Välj en tid före din påminnelse."
         }
       },
       "cooks": {

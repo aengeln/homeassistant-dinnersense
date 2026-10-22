@@ -33,7 +33,11 @@
           "menu_follows_cook": "Menu follows the cook when swapping",
           "unconfirmed_past": "Unconfirmed past dinners count as",
           "ai_task_entity": "AI Task for tips (optional)",
-          "todo_entity": "Shopping list (optional)"
+          "todo_entity": "Shopping list (optional)",
+          "tonight_fixed_from": "Tonight is fixed from (optional)"
+        },
+        "data_description": {
+          "tonight_fixed_from": "After this time tonight can't be swapped, and sensors or availability changes won't change tonight's cook (you are told instead). Leave empty to never fix it. Pick a time before your reminder."
         }
       },
       "cooks": {

@@ -1125,3 +1125,51 @@ async def test_planned_dish_keeps_its_cook_when_availability_appears_at_boot(
     assert hass.states.get("sensor.test_household_dinner_today").state == "Ann"
     assert hass.states.get("select.test_household_dinner_day_0").attributes["locked"]
     assert [c.data["date"] for c in conflicts] == ["2026-03-02"]
+
+
+# -- tonight, the cut-off setting ---------------------------------------------------------
+
+
+async def test_options_flow_saves_the_tonight_cutoff_and_it_blocks_swaps(
+    hass, entry, freezer
+) -> None:
+    freezer.move_to(NOW)  # 04:00 local
+    await _setup(hass, entry)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "settings"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            "cook_names": "Ann, Bob, Cy",
+            "horizon_days": 10,
+            "roll_time": "02:00:00",
+            "dinner_days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+            "menu_follows_cook": True,
+            "unconfirmed_past": "done",
+            "tonight_fixed_from": "03:00:00",
+        },
+    )
+    assert result["type"] == "create_entry"
+    assert entry.options["settings"]["tonight_fixed_from"] == "03:00:00"
+    await hass.async_block_till_done()
+    # 04:00 is after 03:00, so tonight is fixed and swapping it is refused.
+    with pytest.raises(HomeAssistantError, match="fixed after 03:00"):
+        await hass.services.async_call(
+            "select",
+            "select_option",
+            {"entity_id": "select.test_household_dinner_day_0", "option": "Cy"},
+            blocking=True,
+        )
+    # Another day still works, and never pulls tonight in as the partner.
+    await hass.services.async_call(
+        "select",
+        "select_option",
+        {"entity_id": "select.test_household_dinner_day_4", "option": "Ann"},
+        blocking=True,
+    )
+    assert hass.states.get("select.test_household_dinner_day_0").state == "Ann"
+    assert not hass.states.get("select.test_household_dinner_day_0").attributes[
+        "locked"
+    ]

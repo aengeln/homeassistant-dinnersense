@@ -39,6 +39,7 @@ from .models import Cook, Settings, build_cooks
 CONF_COOK_NAMES = "cook_names"
 CONF_AI_TASK = "ai_task_entity"
 CONF_TODO = "todo_entity"
+CONF_TONIGHT_FIXED = "tonight_fixed_from"
 CONF_COOK = "cook"
 CONF_PERSON = "person_entity"
 CONF_COLOR = "color"
@@ -224,6 +225,7 @@ class DinnerSenseOptionsFlow(OptionsFlow):
                     CONF_UNCONFIRMED_PAST: user_input[CONF_UNCONFIRMED_PAST],
                     CONF_AI_TASK: user_input.get(CONF_AI_TASK) or None,
                     CONF_TODO: user_input.get(CONF_TODO) or None,
+                    CONF_TONIGHT_FIXED: user_input.get(CONF_TONIGHT_FIXED) or None,
                 }
             )
             return self.async_create_entry(
@@ -233,6 +235,11 @@ class DinnerSenseOptionsFlow(OptionsFlow):
                 }
             )
 
+        fixed_default = (
+            {"suggested_value": settings.tonight_fixed_from}
+            if settings.tonight_fixed_from
+            else None
+        )
         todo_default = (
             {"suggested_value": settings.todo_entity} if settings.todo_entity else None
         )
@@ -277,6 +284,9 @@ class DinnerSenseOptionsFlow(OptionsFlow):
                         options=["done", "missed"],
                         translation_key="unconfirmed_past",
                     )
+                ),
+                vol.Optional(CONF_TONIGHT_FIXED, description=fixed_default): (
+                    selector.TimeSelector()
                 ),
                 vol.Optional(CONF_TODO, description=todo_default): (
                     selector.EntitySelector(

@@ -86,7 +86,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: DinnerSenseConfigEntry) 
 
     async def _nightly_roll() -> None:
         await tracker.async_refresh()  # calendars may have changed overnight
-        _roll(planner)
+        _roll(planner, announce=True)
 
     @callback
     def _midnight(_: datetime) -> None:
@@ -106,12 +106,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: DinnerSenseConfigEntry) 
     return True
 
 
-def _roll(planner: Planner) -> None:
+def _roll(planner: Planner, *, announce: bool = False) -> None:
     today = dt_util.now().date()
     known = {c.id for c in planner.cooks}
     if any(d.cook not in known and d.date >= today for d in planner.dinners.values()):
         planner.set_cooks(planner.cooks, today)
-    planner.roll(today)
+    planner.roll(today, announce=announce)
 
 
 async def _async_reload(hass: HomeAssistant, entry: DinnerSenseConfigEntry) -> None:
