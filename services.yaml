@@ -169,12 +169,20 @@ import_from_entity:
     config_entry_id:
       selector: { config_entry: { integration: dinnersense } }
     entity_id:
-      required: true
       example: input_text.today_s_dinner
       selector:
         entity:
           filter:
             - domain: input_text
+            - domain: text
+    cook_entity:
+      example: input_select.dinner_duty
+      selector:
+        entity:
+          filter:
+            - domain: input_select
+            - domain: input_text
+            - domain: select
             - domain: text
     days:
       default: 10

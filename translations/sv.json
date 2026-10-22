@@ -448,14 +448,14 @@
     },
     "import_from_entity": {
       "name": "Importera från entitet",
-      "description": "Fyll i tidigare menyer från recorder-historiken för en befintlig textentitet. Sista riktiga värdet varje dag blir dagens meny. Dagar som redan har en meny hoppas över om inte skriv över är på.",
+      "description": "Fyll i tidigare dagar från recorder-historiken för befintliga entiteter: en textentitet ger dagens meny, och en select-/textentitet (till exempel den gamla kock-för-dagen-hjälparen) ger vem som lagade. Sista riktiga värdet varje dag används. Befintliga menyer och kockar behålls om inte skriv över är på.",
       "fields": {
         "config_entry_id": {
           "name": "Hushåll",
           "description": ""
         },
         "entity_id": {
-          "name": "Entitet",
+          "name": "Menyentitet",
           "description": "En input_text- eller text-entitet med middagens titel."
         },
         "days": {
@@ -465,6 +465,10 @@
         "overwrite": {
           "name": "Skriv över befintliga menyer",
           "description": ""
+        },
+        "cook_entity": {
+          "name": "Kockentitet",
+          "description": "En entitet vars tillstånd är kockens namn (matchas mot dina kockar på namn). Fyller i vem som lagade på dagar utan kock."
         }
       }
     }

@@ -63,15 +63,19 @@ INGREDIENTS_SCHEMA = vol.Schema(
         vol.Optional("todo_entity"): cv.entity_id,
     }
 )
-IMPORT_SCHEMA = vol.Schema(
-    {
-        **_BASE,
-        vol.Required("entity_id"): cv.entity_id,
-        vol.Optional("days", default=10): vol.All(
-            vol.Coerce(int), vol.Range(min=1, max=365)
-        ),
-        vol.Optional("overwrite", default=False): cv.boolean,
-    }
+IMPORT_SCHEMA = vol.All(
+    vol.Schema(
+        {
+            **_BASE,
+            vol.Optional("entity_id"): cv.entity_id,
+            vol.Optional("cook_entity"): cv.entity_id,
+            vol.Optional("days", default=10): vol.All(
+                vol.Coerce(int), vol.Range(min=1, max=365)
+            ),
+            vol.Optional("overwrite", default=False): cv.boolean,
+        }
+    ),
+    cv.has_at_least_one_key("entity_id", "cook_entity"),
 )
 STATS_SCHEMA = vol.Schema(
     {
@@ -308,15 +312,39 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
     async def import_from_entity(call: ServiceCall) -> ServiceResponse:
         planner = _planner(hass, call)
-        entity_id, days = call.data["entity_id"], call.data["days"]
-        if hass.states.get(entity_id) is None:
-            raise HomeAssistantError(f"{entity_id} was not found")
-        states = await async_read_states(hass, entity_id, days)
-        titles = titles_by_day(states, today(), days)
+        days = call.data["days"]
+        titles: dict[date, str] = {}
+        cooks: dict[date, str] = {}
+        unknown: list[dict[str, Any]] = []
+        for key in ("entity_id", "cook_entity"):
+            entity_id = call.data.get(key)
+            if entity_id and hass.states.get(entity_id) is None:
+                raise HomeAssistantError(f"{entity_id} was not found")
+        if entity_id := call.data.get("entity_id"):
+            titles = titles_by_day(
+                await async_read_states(hass, entity_id, days), today(), days
+            )
+        if entity_id := call.data.get("cook_entity"):
+            names = titles_by_day(
+                await async_read_states(hass, entity_id, days), today(), days
+            )
+            for day, name in names.items():
+                cook = planner.cook(name) or planner.cook_by_name(name)
+                if cook is None:
+                    unknown.append(
+                        {
+                            "date": day.isoformat(),
+                            "title": None,
+                            "cook": name,
+                            "reason": "unknown_cook",
+                        }
+                    )
+                else:
+                    cooks[day] = cook.id
         imported, skipped = planner.import_menus(
-            titles, today(), call.data["overwrite"]
+            titles, today(), call.data["overwrite"], cooks
         )
-        return {"imported": imported, "skipped": skipped}
+        return {"imported": imported, "skipped": skipped + unknown}
 
     hass.services.async_register(
         DOMAIN,

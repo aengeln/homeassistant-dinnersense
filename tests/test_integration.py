@@ -738,8 +738,8 @@ async def test_import_from_entity_reads_real_recorder_history(
         return_response=True,
     )
     assert resp["imported"] == [
-        {"date": "2026-02-27", "title": "Soup"},
-        {"date": "2026-02-28", "title": "Pasta carbonara"},
+        {"date": "2026-02-27", "title": "Soup", "cook": None},
+        {"date": "2026-02-28", "title": "Pasta carbonara", "cook": None},
     ]
     hist = await hass.services.async_call(
         DOMAIN,
@@ -1173,3 +1173,81 @@ async def test_options_flow_saves_the_tonight_cutoff_and_it_blocks_swaps(
     assert not hass.states.get("select.test_household_dinner_day_0").attributes[
         "locked"
     ]
+
+
+@pytest.mark.real_recorder
+async def test_import_fills_in_who_cooked_from_a_cook_entity(
+    recorder_mock, hass, enable_custom_integrations, entry, freezer
+) -> None:
+    from pytest_homeassistant_custom_component.components.recorder.common import (
+        async_wait_recording_done,
+    )
+
+    menu, duty = "input_text.today_s_dinner", "input_select.dinner_duty"
+    history = (
+        # (time, menu, duty): the old setup rotated the duty at 02:00 local (10:00 UTC)
+        ("2026-02-26 20:00:00+00:00", "Soup", "Bob"),
+        ("2026-02-27 10:00:00+00:00", "", "Cy"),
+        ("2026-02-27 20:00:00+00:00", "Pasta", "Cy"),
+        ("2026-02-28 10:00:00+00:00", "", "Zed"),  # not one of the cooks
+        ("2026-03-01 10:00:00+00:00", "", "Ann"),  # a day with a cook but no menu
+    )
+    for stamp, title, cook in history:
+        freezer.move_to(stamp)
+        hass.states.async_set(menu, title)
+        hass.states.async_set(duty, cook)
+        await hass.async_block_till_done()
+    await async_wait_recording_done(hass)
+
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    resp = await hass.services.async_call(
+        DOMAIN,
+        "import_from_entity",
+        {"entity_id": menu, "cook_entity": duty, "days": 10},
+        blocking=True,
+        return_response=True,
+    )
+    assert {(i["date"], i["title"], i["cook"]) for i in resp["imported"]} == {
+        ("2026-02-26", "Soup", "Bob"),
+        ("2026-02-27", "Pasta", "Cy"),
+        ("2026-03-01", None, "Ann"),
+    }
+    assert [(s["date"], s["cook"], s["reason"]) for s in resp["skipped"]] == [
+        ("2026-02-28", "Zed", "unknown_cook")
+    ]
+    hist = await hass.services.async_call(
+        DOMAIN,
+        "get_history",
+        {"start": "2026-02-26", "end": "2026-03-02"},
+        blocking=True,
+        return_response=True,
+    )
+    got = {
+        d["date"]: (d["cook_name"], d["menu_title"], d["status"])
+        for d in hist["dinners"]
+    }
+    assert got["2026-02-26"] == ("Bob", "Soup", "done")
+    assert got["2026-02-27"] == ("Cy", "Pasta", "done")
+    assert got["2026-03-01"][0] == "Ann" and got["2026-03-01"][1] is None
+    # Imported cooks count towards the scores.
+    ann = hass.states.get("sensor.test_household_dinner_score_ann")
+    assert ann.state == "1"
+    # A second run changes nothing.
+    again = await hass.services.async_call(
+        DOMAIN,
+        "import_from_entity",
+        {"entity_id": menu, "cook_entity": duty, "days": 10},
+        blocking=True,
+        return_response=True,
+    )
+    assert again["imported"] == []
+
+
+async def test_import_needs_at_least_one_entity(hass, entry, freezer) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    with pytest.raises(vol.Invalid):
+        await hass.services.async_call(
+            DOMAIN, "import_from_entity", {"days": 5}, blocking=True
+        )

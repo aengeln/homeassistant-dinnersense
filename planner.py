@@ -608,39 +608,78 @@ class Planner:
         menu.title = dish.name if dish else title
 
     def import_menus(
-        self, titles: dict[date, str], today: date, overwrite: bool = False
-    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
-        """Set menu titles for many past days as one change.
+        self,
+        titles: dict[date, str],
+        today: date,
+        overwrite: bool = False,
+        cooks: dict[date, str] | None = None,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Set menu titles and/or who cooked for many past days as one change.
 
-        Days that already have a menu are skipped unless ``overwrite``. Days
-        before the integration ran get log-only records. Returns
-        (imported, skipped), each a list of {date, title[, reason]}.
+        ``cooks`` maps a day to a cook id. A day's title is skipped if it already
+        has a menu, and its cook is only filled in where there is none (a
+        log-only record), unless ``overwrite``. Days before the integration ran
+        get log-only records. Returns (imported, skipped); each item is
+        {date, title, cook[, reason]}.
         """
-        imported: list[dict[str, str]] = []
-        skipped: list[dict[str, str]] = []
+        cooks = cooks or {}
+        imported: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
         before: list[dict[str, Any]] = []
         touched: list[Dinner] = []
-        for day, title in sorted(titles.items()):
-            item = {"date": day.isoformat(), "title": title}
+        for day in sorted(set(titles) | set(cooks)):
+            title, cook_id = titles.get(day), cooks.get(day)
+            cook = self.cook(cook_id) if cook_id else None
+            item = {
+                "date": day.isoformat(),
+                "title": title,
+                "cook": cook.name if cook else None,
+            }
             if day > today:
                 skipped.append({**item, "reason": "future"})
                 continue
             existing = self.dinners.get(day)
-            if existing and self.menu_title(existing) and not overwrite:
-                skipped.append({**item, "reason": "has_menu"})
+            use_title = bool(title) and not (
+                existing and self.menu_title(existing) and not overwrite
+            )
+            use_cook = cook is not None and (
+                existing is None
+                or not existing.cook
+                or (overwrite and existing.cook != cook.id)
+            )
+            if not use_title and not use_cook:
+                skipped.append({**item, "reason": "has_menu" if title else "has_cook"})
                 continue
             dinner = self._dinner_for_menu(day, today)
             before.append(_snapshot(dinner))
-            menu = dinner.menu or MenuEntry()
-            self._link_title(menu, title)
-            dinner.menu = menu
-            dinner.history.append(
-                ChangeRecord(
-                    self._stamp(), "menu", {"title": menu.title, "source": "import"}
+            if use_cook and cook is not None:
+                dinner.history.append(
+                    ChangeRecord(
+                        self._stamp(),
+                        "reassign",
+                        {"from": dinner.cook, "to": cook.id, "source": "import"},
+                    )
                 )
-            )
+                dinner.cook = cook.id
+            if use_title and title:
+                menu = dinner.menu or MenuEntry()
+                self._link_title(menu, title)
+                dinner.menu = menu
+                dinner.history.append(
+                    ChangeRecord(
+                        self._stamp(), "menu", {"title": menu.title, "source": "import"}
+                    )
+                )
             touched.append(dinner)
-            imported.append({**item, "title": menu.title or title})
+            imported.append(
+                {
+                    **item,
+                    "title": self.menu_title(dinner) if use_title else None,
+                    "cook": cook.name if use_cook and cook else None,
+                }
+            )
+            if title and not use_title:
+                skipped.append({**item, "cook": None, "reason": "has_menu"})
         if touched:
             self._commit(
                 [

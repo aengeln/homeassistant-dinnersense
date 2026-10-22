@@ -820,3 +820,38 @@ def test_a_real_change_still_fires_changed_with_a_count():
     name, data = h.events[-1]
     assert name == "dinnersense_changed" and data["reason"] == "availability"
     assert data["rebuilt"] >= 1
+
+
+def test_import_fills_missing_cooks_without_touching_existing_ones():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.roll(days(3))  # days 0..2 are now done with planned cooks ann, bob, cy
+    old = TODAY - timedelta(days=10)
+    imported, skipped = h.planner.import_menus(
+        {days(0): "Soup"},
+        days(3),
+        cooks={old: "bob", days(0): "cy", days(1): "cy"},
+    )
+    assert h.planner.dinners[old].cook == "bob"  # a log-only day gets its cook
+    assert h.planner.dinners[days(0)].cook == "ann"  # an existing cook is kept
+    assert h.planner.dinners[days(1)].cook == "bob"
+    assert h.planner.dinners[days(0)].menu.title == "Soup"
+    assert {i["date"] for i in imported} == {old.isoformat(), days(0).isoformat()}
+    assert {s["reason"] for s in skipped} == {"has_cook"}
+
+
+def test_import_overwrite_replaces_existing_cooks():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.roll(days(3))
+    h.planner.import_menus({}, days(3), overwrite=True, cooks={days(0): "cy"})
+    assert h.planner.dinners[days(0)].cook == "cy"
+    assert h.planner.dinners[days(0)].history[-1].detail["source"] == "import"
+
+
+def test_imported_cook_counts_in_the_scores():
+    h = Harness()
+    h.planner.roll(TODAY)
+    old = TODAY - timedelta(days=5)
+    h.planner.import_menus({old: "Soup"}, TODAY, cooks={old: "bob"})
+    assert h.planner.cook_stats("bob", TODAY)["cooked_30"] == 1
