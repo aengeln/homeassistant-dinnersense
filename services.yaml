@@ -190,3 +190,27 @@ import_from_entity:
     overwrite:
       default: false
       selector: { boolean: }
+set_ingredient:
+  fields:
+    config_entry_id:
+      selector: { config_entry: { integration: dinnersense } }
+    dish_id:
+      required: true
+      selector: { text: }
+    name:
+      required: true
+      example: Tortillas
+      selector: { text: }
+    quantity:
+      example: "8"
+      selector: { text: }
+remove_ingredient:
+  fields:
+    config_entry_id:
+      selector: { config_entry: { integration: dinnersense } }
+    dish_id:
+      required: true
+      selector: { text: }
+    name:
+      required: true
+      selector: { text: }

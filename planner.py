@@ -27,6 +27,7 @@ from .models import (
     Settings,
     slugify,
 )
+from .recipes import ingredient_name_key
 from .rotation import (
     Assignment,
     AvailabilityWindow,
@@ -372,6 +373,35 @@ class Planner:
                 },
             )
         self._reported_conflicts = found
+
+    # -- last cooked -----------------------------------------------------------------
+
+    def last_cooked(self, cook_id: str, today: date) -> dict[str, Any] | None:
+        """The last home-cooked dish this cook made: {date, dish, days_ago}.
+
+        Counts dinners with a title that were done (or are in the past), and
+        not eating out, leftovers or skipped days.
+        """
+        best: Dinner | None = None
+        for day, dinner in self.dinners.items():
+            if dinner.cook != cook_id or day > today:
+                continue
+            if dinner.status != STATUS_DONE and not (
+                dinner.status == STATUS_PLANNED and day < today
+            ):
+                continue
+            menu = dinner.menu
+            if not menu or menu.kind != "home" or not self.menu_title(dinner):
+                continue
+            if best is None or day > best.date:
+                best = dinner
+        if best is None:
+            return None
+        return {
+            "date": best.date.isoformat(),
+            "dish": self.menu_title(best),
+            "days_ago": (today - best.date).days,
+        }
 
     # -- scores ----------------------------------------------------------------------
 
@@ -750,15 +780,80 @@ class Planner:
         dish = self.dishes.get(dish_id)
         if dish is None:
             raise PlannerError(f"Unknown dish: {dish_id}")
+        new_name = changes.get("name")
+        if new_name is not None:
+            new_name = new_name.strip()
+            if not new_name:
+                raise PlannerError("A dish needs a name")
+            other = self.find_dish(new_name)
+            if other is not None and other.id != dish_id:
+                raise PlannerError(f"A dish called '{new_name}' already exists")
+            changes["name"] = new_name
         for key in ("name", "aliases", "tags", "recipe"):
             if changes.get(key) is not None:
-                setattr(dish, key, changes[key])
+                # An empty recipe clears it.
+                value = changes[key] or None if key == "recipe" else changes[key]
+                setattr(dish, key, value)
         dish.updated = self._stamp()
         for dinner in self.dinners.values():
             if dinner.menu and dinner.menu.dish_id == dish_id:
                 dinner.menu.title = dish.name
         self._commit([])
         return dish
+
+    def set_ingredient(
+        self, dish_id: str, name: str, quantity: str | None = None
+    ) -> dict[str, Any]:
+        """Add one ingredient, or change its quantity, without touching the rest.
+
+        Matches by name (case-insensitive). ``quantity`` None keeps the current
+        one; an empty string removes it.
+        """
+        dish = self.dishes.get(dish_id)
+        if dish is None:
+            raise PlannerError(f"Unknown dish: {dish_id}")
+        name = name.strip()
+        if not name:
+            raise PlannerError("An ingredient needs a name")
+        recipe = copy.deepcopy(dish.recipe) if dish.recipe else {}
+        ingredients = recipe.setdefault("ingredients", [])
+        key = ingredient_name_key(name)
+        found = next(
+            (i for i in ingredients if ingredient_name_key(i["name"]) == key), None
+        )
+        if found is None:
+            found = {"name": name}
+            ingredients.append(found)
+        if quantity is not None:
+            if quantity.strip():
+                found["quantity"] = quantity.strip()
+            else:
+                found.pop("quantity", None)
+        dish.recipe = recipe
+        dish.updated = self._stamp()
+        self._commit([])
+        return copy.deepcopy(found)
+
+    def remove_ingredient(self, dish_id: str, name: str) -> None:
+        dish = self.dishes.get(dish_id)
+        if dish is None:
+            raise PlannerError(f"Unknown dish: {dish_id}")
+        recipe = copy.deepcopy(dish.recipe) if dish.recipe else {}
+        key = ingredient_name_key(name)
+        kept = [
+            i
+            for i in recipe.get("ingredients", [])
+            if ingredient_name_key(i["name"]) != key
+        ]
+        if len(kept) == len(recipe.get("ingredients", [])):
+            raise PlannerError(f"{dish.name} has no ingredient called {name}")
+        if kept:
+            recipe["ingredients"] = kept
+        else:
+            del recipe["ingredients"]
+        dish.recipe = recipe or None
+        dish.updated = self._stamp()
+        self._commit([])
 
     def delete_dish(self, dish_id: str) -> None:
         if self.dishes.pop(dish_id, None) is None:

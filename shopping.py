@@ -7,7 +7,6 @@ items don't count, since those have been bought.
 
 from __future__ import annotations
 
-import re
 from datetime import date
 from typing import Any
 
@@ -15,18 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 
 from .models import Dinner, Dish
-
-_QUANTITY_SUFFIX = re.compile(r"\s+x\s+\S.*$", re.IGNORECASE)
-
-
-def ingredient_name_key(text: str) -> str:
-    """Compare list items and ingredients by name, ignoring case and 'x 8'."""
-    return _QUANTITY_SUFFIX.sub("", text.strip()).casefold()
-
-
-def format_item(name: str, quantity: str | None) -> str:
-    name, quantity = name.strip(), (quantity or "").strip()
-    return f"{name} x {quantity}" if quantity else name
+from .recipes import format_item, ingredient_name_key
 
 
 def ingredients_for(

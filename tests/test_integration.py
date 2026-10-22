@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import date, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -1251,3 +1251,276 @@ async def test_import_needs_at_least_one_entity(hass, entry, freezer) -> None:
         await hass.services.async_call(
             DOMAIN, "import_from_entity", {"days": 5}, blocking=True
         )
+
+
+# -- dish editor (options flow), ingredient services, last cooked ------------------------
+
+
+async def _open_dish_form(hass, entry, choice):
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "dishes"}
+    )
+    assert result["step_id"] == "dishes"
+    return await hass.config_entries.options.async_configure(
+        result["flow_id"], {"dish": choice}
+    )
+
+
+def _suggested(form):
+    return {
+        str(k): k.description["suggested_value"]
+        for k in form["data_schema"].schema
+        if k.description and "suggested_value" in k.description
+    }
+
+
+async def test_dish_editor_adds_a_dish_from_plain_text(hass, entry, freezer) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    form = await _open_dish_form(hass, entry, "__new__")
+    assert form["step_id"] == "dish"
+    result = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {
+            "name": "Chicken noodles",
+            "aliases": "noodle night, Chicken Noodle",
+            "tags": "asian, quick",
+            "servings": 4,
+            "ingredients": "Noodles x 200 g\nChicken x 2\nLime",
+            "steps": "Brown the chicken\nBoil water\nCook the noodles",
+            "timers": "Chicken, 8, 1\nNoodles, 4, 3",
+            "url": "https://example.com/cn",
+            "notes": "Serve hot",
+        },
+    )
+    assert result["type"] == "create_entry"
+    dishes = await hass.services.async_call(
+        DOMAIN, "list_dishes", {}, blocking=True, return_response=True
+    )
+    dish = dishes["dishes"][0]
+    assert dish["name"] == "Chicken noodles"
+    assert dish["aliases"] == ["noodle night", "Chicken Noodle"]
+    assert dish["tags"] == ["asian", "quick"]
+    assert dish["recipe"] == {
+        "servings": 4,
+        "ingredients": [
+            {"name": "Noodles", "quantity": "200 g"},
+            {"name": "Chicken", "quantity": "2"},
+            {"name": "Lime"},
+        ],
+        "steps": ["Brown the chicken", "Boil water", "Cook the noodles"],
+        "timers": [
+            {"name": "Chicken", "minutes": 8, "step": 1},
+            {"name": "Noodles", "minutes": 4, "step": 3},
+        ],
+        "url": "https://example.com/cn",
+        "notes": "Serve hot",
+    }
+    # An alias typed as a menu now links the dish.
+    await hass.services.async_call(
+        DOMAIN,
+        "set_menu",
+        {"date": "2026-03-02", "title": "noodle night"},
+        blocking=True,
+    )
+    assert (
+        hass.states.get("text.test_household_dinner_menu_day_0").state
+        == "Chicken noodles"
+    )
+
+
+async def test_dish_editor_shows_the_dish_and_edits_one_ingredient(
+    hass, entry, freezer
+) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    await hass.services.async_call(
+        DOMAIN,
+        "create_dish",
+        {
+            "name": "Tacos",
+            "tags": ["mexican"],
+            "recipe": {
+                "ingredients": [
+                    {"name": "Tortillas", "quantity": "8"},
+                    {"name": "Lime"},
+                ],
+                "steps": ["Cook"],
+            },
+        },
+        blocking=True,
+        return_response=True,
+    )
+    form = await _open_dish_form(hass, entry, "tacos")
+    shown = _suggested(form)
+    assert shown["name"] == "Tacos" and shown["tags"] == "mexican"
+    assert shown["ingredients"] == "Tortillas x 8\nLime"
+    assert shown["steps"] == "Cook"
+
+    shown["ingredients"] = "Tortillas x 12\nLime"  # change one line, resend the rest
+    result = await hass.config_entries.options.async_configure(form["flow_id"], shown)
+    assert result["type"] == "create_entry"
+    dishes = await hass.services.async_call(
+        DOMAIN, "list_dishes", {}, blocking=True, return_response=True
+    )
+    assert dishes["dishes"][0]["recipe"]["ingredients"] == [
+        {"name": "Tortillas", "quantity": "12"},
+        {"name": "Lime"},
+    ]
+
+
+async def test_dish_editor_keeps_typed_text_and_explains_errors(
+    hass, entry, freezer
+) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    form = await _open_dish_form(hass, entry, "__new__")
+    result = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {
+            "name": "Soup",
+            "steps": "Boil",
+            "timers": "Simmer, soon",
+            "ingredients": "Carrots x 3",
+        },
+    )
+    assert result["type"] == "form" and result["errors"] == {"base": "invalid_recipe"}
+    assert "Minutes must be a number" in result["description_placeholders"]["error"]
+    assert _suggested(result)["ingredients"] == "Carrots x 3"  # not lost
+    # Fix it and save.
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {
+            "name": "Soup",
+            "steps": "Boil",
+            "timers": "Simmer, 20, 1",
+            "ingredients": "Carrots x 3",
+        },
+    )
+    assert result["type"] == "create_entry"
+    # A duplicate name is refused with a message.
+    form = await _open_dish_form(hass, entry, "__new__")
+    result = await hass.config_entries.options.async_configure(
+        form["flow_id"], {"name": "soup"}
+    )
+    assert result["errors"] == {"base": "dish_error"}
+    assert "already exists" in result["description_placeholders"]["error"]
+
+
+async def test_dish_editor_can_clear_and_delete(hass, entry, freezer) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    await hass.services.async_call(
+        DOMAIN,
+        "create_dish",
+        {"name": "Tacos", "recipe": {"steps": ["Cook"]}},
+        blocking=True,
+        return_response=True,
+    )
+    form = await _open_dish_form(hass, entry, "tacos")
+    result = await hass.config_entries.options.async_configure(
+        form["flow_id"],
+        {"name": "Tacos", "steps": ""},  # everything emptied
+    )
+    assert result["type"] == "create_entry"
+    dishes = await hass.services.async_call(
+        DOMAIN, "list_dishes", {}, blocking=True, return_response=True
+    )
+    assert dishes["dishes"][0]["recipe"] is None
+    form = await _open_dish_form(hass, entry, "tacos")
+    result = await hass.config_entries.options.async_configure(
+        form["flow_id"], {"name": "Tacos", "delete": True}
+    )
+    assert result["type"] == "create_entry"
+    dishes = await hass.services.async_call(
+        DOMAIN, "list_dishes", {}, blocking=True, return_response=True
+    )
+    assert dishes["dishes"] == []
+
+
+async def test_ingredient_services_change_one_ingredient(hass, entry, freezer) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    await hass.services.async_call(
+        DOMAIN,
+        "create_dish",
+        {
+            "name": "Tacos",
+            "recipe": {
+                "ingredients": [{"name": "Tortillas", "quantity": "8"}],
+                "steps": ["Cook"],
+            },
+        },
+        blocking=True,
+        return_response=True,
+    )
+    resp = await hass.services.async_call(
+        DOMAIN,
+        "set_ingredient",
+        {"dish_id": "tacos", "name": "tortillas", "quantity": "12"},
+        blocking=True,
+        return_response=True,
+    )
+    assert resp == {"name": "Tortillas", "quantity": "12"}
+    await hass.services.async_call(
+        DOMAIN, "set_ingredient", {"dish_id": "tacos", "name": "Lime"}, blocking=True
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "remove_ingredient",
+        {"dish_id": "tacos", "name": "tortillas"},
+        blocking=True,
+    )
+    dishes = await hass.services.async_call(
+        DOMAIN, "list_dishes", {}, blocking=True, return_response=True
+    )
+    assert dishes["dishes"][0]["recipe"] == {
+        "ingredients": [{"name": "Lime"}],
+        "steps": ["Cook"],
+    }
+    with pytest.raises(HomeAssistantError, match="no ingredient"):
+        await hass.services.async_call(
+            DOMAIN,
+            "remove_ingredient",
+            {"dish_id": "tacos", "name": "Fish"},
+            blocking=True,
+        )
+
+
+async def test_last_cooked_is_exposed_for_the_rota(hass, entry, freezer) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    # Ann cooked Tacos on Mon 23 Feb (7 days before NOW); log-only past day.
+    await hass.services.async_call(
+        DOMAIN,
+        "reassign",
+        {"date": "2026-03-02", "cook": "ann"},  # tonight, so the dinner exists
+        blocking=True,
+    )
+    await hass.services.async_call(
+        DOMAIN, "set_menu", {"date": "2026-02-23", "title": "Tacos"}, blocking=True
+    )
+    # Give the past day a cook through the importer's planner path.
+    planner = entry.runtime_data.planner
+    planner.import_menus({}, date(2026, 3, 2), cooks={date(2026, 2, 23): "ann"})
+    await hass.async_block_till_done()
+    attrs = hass.states.get("sensor.test_household_dinner_score_ann").attributes
+    assert attrs["last_cooked_dish"] == "Tacos"
+    assert attrs["last_cooked_date"] == "2026-02-23"
+    assert attrs["last_cooked_days_ago"] == 7
+    today = hass.states.get("sensor.test_household_dinner_today").attributes
+    assert today["cook_last_dish"] == "Tacos" and today["cook_last_days_ago"] == 7
+    assert (
+        hass.states.get("select.test_household_dinner_day_0").attributes[
+            "cook_last_dish"
+        ]
+        == "Tacos"
+    )
+    # Someone who never cooked has none.
+    assert (
+        hass.states.get("sensor.test_household_dinner_score_cy").attributes[
+            "last_cooked_dish"
+        ]
+        is None
+    )

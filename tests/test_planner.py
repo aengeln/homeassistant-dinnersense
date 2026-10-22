@@ -855,3 +855,117 @@ def test_imported_cook_counts_in_the_scores():
     old = TODAY - timedelta(days=5)
     h.planner.import_menus({old: "Soup"}, TODAY, cooks={old: "bob"})
     assert h.planner.cook_stats("bob", TODAY)["cooked_30"] == 1
+
+
+# -- single ingredient edits, clearing a recipe, last cooked ----------------------------
+
+
+def dish_with_recipe(h):
+    h.planner.roll(TODAY)
+    return h.planner.create_dish(
+        "Tacos",
+        recipe={
+            "ingredients": [
+                {"name": "Tortillas", "quantity": "8"},
+                {"name": "Lime"},
+            ],
+            "steps": ["Cook"],
+        },
+    )
+
+
+def test_set_ingredient_changes_one_and_leaves_the_rest():
+    h = Harness()
+    d = dish_with_recipe(h)
+    got = h.planner.set_ingredient(d.id, "tortillas", "12")
+    assert got == {"name": "Tortillas", "quantity": "12"}  # matched by name, name kept
+    assert h.planner.dishes[d.id].recipe == {
+        "ingredients": [{"name": "Tortillas", "quantity": "12"}, {"name": "Lime"}],
+        "steps": ["Cook"],
+    }
+
+
+def test_set_ingredient_adds_new_keeps_or_clears_quantity():
+    h = Harness()
+    d = dish_with_recipe(h)
+    h.planner.set_ingredient(d.id, "Minced beef", "500 g")
+    h.planner.set_ingredient(d.id, "Tortillas")  # quantity omitted: unchanged
+    h.planner.set_ingredient(d.id, "Lime", "2")
+    h.planner.set_ingredient(d.id, "Lime", "")  # empty: quantity removed
+    ings = h.planner.dishes[d.id].recipe["ingredients"]
+    assert ings == [
+        {"name": "Tortillas", "quantity": "8"},
+        {"name": "Lime"},
+        {"name": "Minced beef", "quantity": "500 g"},
+    ]
+
+
+def test_set_ingredient_creates_a_recipe_when_there_is_none():
+    h = Harness()
+    h.planner.roll(TODAY)
+    d = h.planner.create_dish("Soup")
+    h.planner.set_ingredient(d.id, "Carrots", "3")
+    assert h.planner.dishes[d.id].recipe == {
+        "ingredients": [{"name": "Carrots", "quantity": "3"}]
+    }
+
+
+def test_remove_ingredient_and_errors():
+    h = Harness()
+    d = dish_with_recipe(h)
+    h.planner.remove_ingredient(d.id, "LIME")
+    assert [i["name"] for i in h.planner.dishes[d.id].recipe["ingredients"]] == [
+        "Tortillas"
+    ]
+    with pytest.raises(planner_mod.PlannerError, match="no ingredient"):
+        h.planner.remove_ingredient(d.id, "Lime")
+    with pytest.raises(planner_mod.PlannerError, match="Unknown dish"):
+        h.planner.set_ingredient("nope", "x")
+    with pytest.raises(planner_mod.PlannerError, match="needs a name"):
+        h.planner.set_ingredient(d.id, "  ")
+    h.planner.remove_ingredient(d.id, "Tortillas")  # last one: the key disappears
+    assert h.planner.dishes[d.id].recipe == {"steps": ["Cook"]}
+
+
+def test_ingredient_edits_do_not_alias_the_stored_recipe():
+    h = Harness()
+    d = dish_with_recipe(h)
+    before = h.planner.dishes[d.id].recipe
+    h.planner.set_ingredient(d.id, "Lime", "5")
+    assert before["ingredients"][1] == {"name": "Lime"}  # the old object is untouched
+
+
+def test_an_empty_recipe_clears_it():
+    h = Harness()
+    d = dish_with_recipe(h)
+    h.planner.update_dish(d.id, recipe={})
+    assert h.planner.dishes[d.id].recipe is None
+
+
+def test_last_cooked_per_cook():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.roll(days(5))  # days 0..4 done: ann bob cy ann bob
+    h.planner.set_menu(days(0), days(5), title="Tacos")  # ann
+    h.planner.set_menu(days(3), days(5), title="Soup")  # ann, later
+    h.planner.set_menu(days(1), days(5), kind="eating_out")  # bob: not cooked
+    h.planner.set_menu(days(4), days(5), title="Pie")  # bob
+    h.planner.set_menu(days(2), days(5), title="Leftover stew", kind="leftovers")  # cy
+    today = days(5)
+    assert h.planner.last_cooked("ann", today) == {
+        "date": days(3).isoformat(),
+        "dish": "Soup",
+        "days_ago": 2,
+    }
+    assert h.planner.last_cooked("bob", today)["dish"] == "Pie"  # not the restaurant
+    assert h.planner.last_cooked("cy", today) is None  # leftovers aren't cooking
+
+
+def test_last_cooked_ignores_tonight_until_done_and_the_future():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.set_menu(TODAY, TODAY, title="Tonight")  # ann, still planned
+    h.planner.set_menu(days(3), TODAY, title="Later")  # ann, future
+    assert h.planner.last_cooked("ann", TODAY) is None
+    h.planner.complete(TODAY)
+    assert h.planner.last_cooked("ann", TODAY)["dish"] == "Tonight"

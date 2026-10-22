@@ -77,7 +77,11 @@ class DinnerScoreSensor(DinnerSenseEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, object]:
         stats = self._stats()
+        last = self.planner.last_cooked(self._cook_id, local_today()) or {}
         return {
+            "last_cooked_dish": last.get("dish"),
+            "last_cooked_date": last.get("date"),
+            "last_cooked_days_ago": last.get("days_ago"),
             "cook_id": self._cook_id,
             "cooked_90": stats["cooked_90"],
             "swaps_given": stats["swaps_given"],

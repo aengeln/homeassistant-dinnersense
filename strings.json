@@ -20,7 +20,8 @@
         "title": "Dinner Sense",
         "menu_options": {
           "settings": "Plan settings",
-          "cooks": "Cooks and availability"
+          "cooks": "Cooks and availability",
+          "dishes": "Dishes and recipes"
         }
       },
       "settings": {
@@ -59,10 +60,43 @@
           "away_to": "Away to (date helper)",
           "away_sensor": "Away now (binary sensor, today only)"
         }
+      },
+      "dishes": {
+        "title": "Dishes",
+        "description": "Pick a dish to edit, or add a new one.",
+        "data": {
+          "dish": "Dish"
+        }
+      },
+      "dish": {
+        "title": "Dish",
+        "description": "One item per line. Ingredients: `Tortillas x 8` (or just `Lime`). Timers: `name, minutes, step` where the step number is optional and starts at 1, for example `Noodles, 4, 3`.",
+        "data": {
+          "name": "Name",
+          "aliases": "Aliases (comma separated)",
+          "tags": "Tags (comma separated)",
+          "servings": "Servings",
+          "ingredients": "Ingredients",
+          "steps": "Steps",
+          "timers": "Timers",
+          "url": "Link",
+          "notes": "Notes",
+          "delete": "Delete this dish"
+        },
+        "data_description": {
+          "aliases": "Typing any of these as a menu links this dish.",
+          "ingredients": "One per line, like `Tortillas x 8`.",
+          "timers": "One per line: `name, minutes, step`."
+        }
       }
     },
     "abort": {
-      "no_cooks": "Add cooks in Plan settings first."
+      "no_cooks": "Add cooks in Plan settings first.",
+      "not_loaded": "Dinner Sense isn't loaded right now. Try again in a moment."
+    },
+    "error": {
+      "invalid_recipe": "{error}",
+      "dish_error": "{error}"
     }
   },
   "selector": {
@@ -469,6 +503,46 @@
         "cook_entity": {
           "name": "Cook entity",
           "description": "An entity whose state is the cook's name (matched to your cooks by name). Fills in who cooked on days that have no cook."
+        }
+      }
+    },
+    "set_ingredient": {
+      "name": "Set ingredient",
+      "description": "Add one ingredient to a dish, or change its quantity, without resending the whole recipe. Matches by name. Leave quantity out to keep it; an empty quantity removes it.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
+          "description": ""
+        },
+        "dish_id": {
+          "name": "Dish ID",
+          "description": ""
+        },
+        "name": {
+          "name": "Ingredient",
+          "description": ""
+        },
+        "quantity": {
+          "name": "Quantity",
+          "description": ""
+        }
+      }
+    },
+    "remove_ingredient": {
+      "name": "Remove ingredient",
+      "description": "Remove one ingredient from a dish's recipe.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
+          "description": ""
+        },
+        "dish_id": {
+          "name": "Dish ID",
+          "description": ""
+        },
+        "name": {
+          "name": "Ingredient",
+          "description": ""
         }
       }
     }

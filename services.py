@@ -167,6 +167,17 @@ UPDATE_DISH_SCHEMA = vol.Schema(
     }
 )
 DELETE_DISH_SCHEMA = vol.Schema({**_BASE, vol.Required("dish_id"): cv.string})
+SET_INGREDIENT_SCHEMA = vol.Schema(
+    {
+        **_BASE,
+        vol.Required("dish_id"): cv.string,
+        vol.Required("name"): cv.string,
+        vol.Optional("quantity"): cv.string,
+    }
+)
+REMOVE_INGREDIENT_SCHEMA = vol.Schema(
+    {**_BASE, vol.Required("dish_id"): cv.string, vol.Required("name"): cv.string}
+)
 
 
 def _entry(hass: HomeAssistant, call: ServiceCall) -> DinnerSenseConfigEntry:
@@ -258,6 +269,14 @@ def async_setup_services(hass: HomeAssistant) -> None:
     def update_dish(p: Planner, c: ServiceCall) -> None:
         changes = {k: v for k, v in c.data.items() if k not in _BASE and k != "dish_id"}
         p.update_dish(c.data["dish_id"], **changes)
+
+    def set_ingredient(p: Planner, c: ServiceCall) -> ServiceResponse:
+        return p.set_ingredient(
+            c.data["dish_id"], c.data["name"], c.data.get("quantity")
+        )
+
+    def remove_ingredient(p: Planner, c: ServiceCall) -> None:
+        p.remove_ingredient(c.data["dish_id"], c.data["name"])
 
     def delete_dish(p: Planner, c: ServiceCall) -> None:
         p.delete_dish(c.data["dish_id"])
@@ -394,6 +413,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
         ("create_dish", CREATE_DISH_SCHEMA, create_dish, optional),
         ("update_dish", UPDATE_DISH_SCHEMA, update_dish, none),
         ("delete_dish", DELETE_DISH_SCHEMA, delete_dish, none),
+        ("set_ingredient", SET_INGREDIENT_SCHEMA, set_ingredient, optional),
+        ("remove_ingredient", REMOVE_INGREDIENT_SCHEMA, remove_ingredient, none),
         ("list_dishes", ENTRY_SCHEMA, list_dishes, only),
     ):
         hass.services.async_register(

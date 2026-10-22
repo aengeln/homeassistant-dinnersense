@@ -8,6 +8,7 @@ import voluptuous as vol
 
 from homeassistant.config_entries import (
     ConfigEntry,
+    ConfigEntryState,
     ConfigFlow,
     ConfigFlowResult,
     OptionsFlow,
@@ -35,12 +36,34 @@ from .const import (
     WEEKDAYS,
 )
 from .models import Cook, Settings, build_cooks
+from .planner import PlannerError
+from .recipes import (
+    RecipeTextError,
+    build_recipe,
+    format_ingredients,
+    format_steps,
+    format_timers,
+    split_words,
+)
 
 CONF_COOK_NAMES = "cook_names"
 CONF_AI_TASK = "ai_task_entity"
 CONF_TODO = "todo_entity"
 CONF_TONIGHT_FIXED = "tonight_fixed_from"
 CONF_COOK = "cook"
+CONF_DISH = "dish"
+CONF_DISH_NAME = "name"
+CONF_ALIASES = "aliases"
+CONF_TAGS = "tags"
+CONF_SERVINGS = "servings"
+CONF_INGREDIENTS = "ingredients"
+CONF_STEPS = "steps"
+CONF_TIMERS = "timers"
+CONF_URL = "url"
+CONF_NOTES = "notes"
+CONF_DELETE = "delete"
+NEW_DISH = "__new__"
+NEW_DISH_LABEL = {"en": "➕ New dish", "sv": "➕ Ny rätt"}
 CONF_PERSON = "person_entity"
 CONF_COLOR = "color"
 CONF_AWAY_CALENDAR = "away_calendar"
@@ -119,11 +142,148 @@ class DinnerSenseConfigFlow(ConfigFlow, domain=DOMAIN):
 class DinnerSenseOptionsFlow(OptionsFlow):
     def __init__(self) -> None:
         self._cook_id: str | None = None
+        self._dish_id: str | None = None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        return self.async_show_menu(step_id="init", menu_options=["settings", "cooks"])
+        return self.async_show_menu(
+            step_id="init", menu_options=["settings", "cooks", "dishes"]
+        )
+
+    # -- dishes ------------------------------------------------------------------
+
+    def _planner(self):  # noqa: ANN202
+        if self.config_entry.state is not ConfigEntryState.LOADED:
+            return None
+        return self.config_entry.runtime_data.planner
+
+    async def async_step_dishes(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick a dish to edit, or add a new one."""
+        planner = self._planner()
+        if planner is None:
+            return self.async_abort(reason="not_loaded")
+        if user_input is not None:
+            choice = user_input[CONF_DISH]
+            self._dish_id = None if choice == NEW_DISH else choice
+            return await self.async_step_dish()
+        language = self.hass.config.language.split("-")[0].casefold()
+        dishes = sorted(planner.dishes.values(), key=lambda d: d.name.casefold())
+        options = [
+            selector.SelectOptionDict(
+                value=NEW_DISH, label=NEW_DISH_LABEL.get(language, NEW_DISH_LABEL["en"])
+            ),
+            *(selector.SelectOptionDict(value=d.id, label=d.name) for d in dishes),
+        ]
+        return self.async_show_form(
+            step_id="dishes",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_DISH, default=NEW_DISH): selector.SelectSelector(
+                        selector.SelectSelectorConfig(options=options)
+                    )
+                }
+            ),
+        )
+
+    async def async_step_dish(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Add or edit one dish. Ingredients, steps and timers are plain text lines."""
+        planner = self._planner()
+        if planner is None:
+            return self.async_abort(reason="not_loaded")
+        dish = planner.dishes.get(self._dish_id) if self._dish_id else None
+        errors: dict[str, str] = {}
+        placeholders = {"error": "", "dish": dish.name if dish else ""}
+
+        if user_input is not None:
+            if dish and user_input.get(CONF_DELETE):
+                planner.delete_dish(dish.id)
+                return self.async_create_entry(data=dict(self.config_entry.options))
+            try:
+                recipe = build_recipe(
+                    servings=user_input.get(CONF_SERVINGS),
+                    ingredients=user_input.get(CONF_INGREDIENTS),
+                    steps=user_input.get(CONF_STEPS),
+                    timers=user_input.get(CONF_TIMERS),
+                    url=user_input.get(CONF_URL),
+                    notes=user_input.get(CONF_NOTES),
+                )
+            except RecipeTextError as err:
+                errors["base"] = "invalid_recipe"
+                placeholders["error"] = str(err)
+            else:
+                aliases = split_words(user_input.get(CONF_ALIASES))
+                tags = split_words(user_input.get(CONF_TAGS))
+                name = user_input[CONF_DISH_NAME].strip()
+                try:
+                    if dish:
+                        planner.update_dish(
+                            dish.id,
+                            name=name,
+                            aliases=aliases,
+                            tags=tags,
+                            recipe=recipe,
+                        )
+                    else:
+                        planner.create_dish(name, aliases, tags, recipe or None)
+                except PlannerError as err:
+                    errors["base"] = "dish_error"
+                    placeholders["error"] = str(err)
+                else:
+                    return self.async_create_entry(data=dict(self.config_entry.options))
+
+        # What to show: what the user just typed (after an error), else the dish.
+        recipe_now = (dish.recipe or {}) if dish else {}
+        shown: dict[str, Any] = user_input or {
+            CONF_DISH_NAME: dish.name if dish else "",
+            CONF_ALIASES: ", ".join(dish.aliases) if dish else "",
+            CONF_TAGS: ", ".join(dish.tags) if dish else "",
+            CONF_SERVINGS: recipe_now.get("servings"),
+            CONF_INGREDIENTS: format_ingredients(recipe_now.get("ingredients")),
+            CONF_STEPS: format_steps(recipe_now.get("steps")),
+            CONF_TIMERS: format_timers(recipe_now.get("timers")),
+            CONF_URL: recipe_now.get("url", ""),
+            CONF_NOTES: recipe_now.get("notes", ""),
+        }
+
+        def field(key: str, *, required: bool = False) -> vol.Marker:
+            marker = vol.Required if required else vol.Optional
+            value = shown.get(key)
+            return marker(
+                key,
+                description={"suggested_value": value}
+                if value not in (None, "")
+                else None,
+            )
+
+        multiline = selector.TextSelector(selector.TextSelectorConfig(multiline=True))
+        fields: dict[Any, Any] = {
+            field(CONF_DISH_NAME, required=True): str,
+            field(CONF_ALIASES): str,
+            field(CONF_TAGS): str,
+            field(CONF_SERVINGS): selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=1, max=100, mode=selector.NumberSelectorMode.BOX
+                )
+            ),
+            field(CONF_INGREDIENTS): multiline,
+            field(CONF_STEPS): multiline,
+            field(CONF_TIMERS): multiline,
+            field(CONF_URL): str,
+            field(CONF_NOTES): multiline,
+        }
+        if dish:
+            fields[vol.Optional(CONF_DELETE, default=False)] = bool
+        return self.async_show_form(
+            step_id="dish",
+            data_schema=vol.Schema(fields),
+            errors=errors,
+            description_placeholders=placeholders,
+        )
 
     async def async_step_cooks(
         self, user_input: dict[str, Any] | None = None

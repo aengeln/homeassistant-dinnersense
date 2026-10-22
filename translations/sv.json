@@ -20,7 +20,8 @@
         "title": "Dinner Sense",
         "menu_options": {
           "settings": "Planinställningar",
-          "cooks": "Kockar och tillgänglighet"
+          "cooks": "Kockar och tillgänglighet",
+          "dishes": "Rätter och recept"
         }
       },
       "settings": {
@@ -59,10 +60,43 @@
           "away_to": "Borta till (datumhjälpare)",
           "away_sensor": "Borta nu (binärsensor, endast idag)"
         }
+      },
+      "dishes": {
+        "title": "Rätter",
+        "description": "Välj en rätt att redigera, eller lägg till en ny.",
+        "data": {
+          "dish": "Rätt"
+        }
+      },
+      "dish": {
+        "title": "Rätt",
+        "description": "Ett per rad. Ingredienser: `Tortillas x 8` (eller bara `Lime`). Timers: `namn, minuter, steg` där stegnumret är valfritt och börjar på 1, till exempel `Nudlar, 4, 3`.",
+        "data": {
+          "name": "Namn",
+          "aliases": "Alias (separerade med komma)",
+          "tags": "Taggar (separerade med komma)",
+          "servings": "Portioner",
+          "ingredients": "Ingredienser",
+          "steps": "Steg",
+          "timers": "Timers",
+          "url": "Länk",
+          "notes": "Anteckningar",
+          "delete": "Ta bort den här rätten"
+        },
+        "data_description": {
+          "aliases": "Skriver man något av dessa som meny länkas rätten.",
+          "ingredients": "En per rad, som `Tortillas x 8`.",
+          "timers": "En per rad: `namn, minuter, steg`."
+        }
       }
     },
     "abort": {
-      "no_cooks": "Lägg till kockar under Planinställningar först."
+      "no_cooks": "Lägg till kockar under Planinställningar först.",
+      "not_loaded": "Dinner Sense är inte laddat just nu. Försök igen om en stund."
+    },
+    "error": {
+      "invalid_recipe": "{error}",
+      "dish_error": "{error}"
     }
   },
   "selector": {
@@ -469,6 +503,46 @@
         "cook_entity": {
           "name": "Kockentitet",
           "description": "En entitet vars tillstånd är kockens namn (matchas mot dina kockar på namn). Fyller i vem som lagade på dagar utan kock."
+        }
+      }
+    },
+    "set_ingredient": {
+      "name": "Sätt ingrediens",
+      "description": "Lägg till en ingrediens i en rätt, eller ändra mängden, utan att skicka om hela receptet. Matchar på namn. Utelämna mängd för att behålla den; tom mängd tar bort den.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
+          "description": ""
+        },
+        "dish_id": {
+          "name": "Rätt-ID",
+          "description": ""
+        },
+        "name": {
+          "name": "Ingrediens",
+          "description": ""
+        },
+        "quantity": {
+          "name": "Mängd",
+          "description": ""
+        }
+      }
+    },
+    "remove_ingredient": {
+      "name": "Ta bort ingrediens",
+      "description": "Ta bort en ingrediens ur en rätts recept.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
+          "description": ""
+        },
+        "dish_id": {
+          "name": "Rätt-ID",
+          "description": ""
+        },
+        "name": {
+          "name": "Ingrediens",
+          "description": ""
         }
       }
     }

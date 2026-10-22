@@ -42,6 +42,7 @@ class DinnerSenseEntity(Entity):
         cook = self.planner.cook(dinner.cook)
         menu = dinner.menu
         attendance = self.planner.attendance(dinner)
+        last = self.planner.last_cooked(dinner.cook, local_today()) or {}
 
         def names(ids: list[str]) -> list[str]:
             return [c.name for i in ids if (c := self.planner.cook(i))]
@@ -50,6 +51,10 @@ class DinnerSenseEntity(Entity):
             "going_out": names(attendance["going_out"]),
             "at_home": names(attendance["at_home"]),
             "cooking_needed": attendance["cooking_needed"],
+            # What this cook last cooked, for rota rows like "Libertad (last: Tacos)"
+            "cook_last_dish": last.get("dish"),
+            "cook_last_date": last.get("date"),
+            "cook_last_days_ago": last.get("days_ago"),
             "date": dinner.date.isoformat(),
             "weekday": dinner.date.strftime("%A"),
             "status": dinner.status,

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.0
+
+- **Swaps never pull tonight in.** A swap's partner day is always after today.
+- **Tonight is fixed from** (optional setting): after that time tonight can't be swapped, and sensors
+  or availability changes no longer change tonight's cook; a `dinnersense_conflict` is fired instead.
+- **Eating out, leftovers and no dinner stay on their date** when cooks swap. Only dishes follow the
+  cook, and only if both days allow it. (Before, any menu moved, including eating out.)
+- A restart that changes nothing no longer fires `dinnersense_changed` or `dinnersense_rolled` or
+  writes storage. The scheduled nightly roll still always announces.
+- `import_from_entity` can fill in **who cooked** from a `cook_entity` (for example the old
+  `input_select.dinner_duty`), including days with no menu.
+- **Dish editor** in Configure → Dishes and recipes (ingredients, steps, timers as plain text).
+- `set_ingredient` / `remove_ingredient` change one ingredient without resending the recipe, and an
+  empty recipe in `update_dish` clears it. Renaming a dish to an existing name is refused.
+- **Last cooked** per person: `cook_last_*` on day entities and the today/tomorrow sensors, and
+  `last_cooked_*` on the score sensors.
+
 ## 0.1.1
 
 - **Setting a menu now locks the day's cook.** Before, a rebuild (availability appearing at boot, a

@@ -43,7 +43,8 @@ Copy this folder to `config/custom_components/dinnersense/` and restart.
    | Days planned ahead | 10 | 3–14 |
    | Nightly roll time | 02:00 | When yesterday is closed out and the horizon is topped up |
    | Days with a planned dinner | all | Untick days with no dinner |
-   | Menu follows the cook when swapping | on | Off keeps menus on their dates |
+   | Menu follows the cook when swapping | on | Dishes follow the cook; eating out, leftovers and no dinner always stay on their date. Off keeps every menu on its date |
+   | Tonight is fixed from | none | A time of day. After it tonight can't be swapped, and sensors or availability changes won't change tonight's cook (see [Tonight](#tonight)) |
    | Unconfirmed past dinners count as | Done | Or Missed |
    | Shopping list | none | A `todo` entity, for the ingredients button |
    | AI Task for tips | none | Optional, see [Tips](#tips) |
@@ -61,10 +62,24 @@ Copy this folder to `config/custom_components/dinnersense/` and restart.
 - A human change **locks** a dinner: a swap, a reassign, or **setting a menu** (a title or dish, eating
   out, leftovers or no dinner). Generation never overwrites locked dinners or the past. Clearing a
   menu unlocks the day again, unless it was also swapped or reassigned.
-- **Swap**: give day A to cook P. P's next planned day (from today) goes to A's old cook. Both days
-  are locked. If P has no upcoming day, the plan is extended (up to 60 days) until there is one.
-  Past days can't be swapped; use `reassign` to correct the log.
+- **Swap**: give day A to cook P. P's next planned day **after today** goes to A's old cook, so
+  tonight is never pulled into someone else's swap. Both days are locked. If P has no later day, the
+  plan is extended (up to 60 days) until there is one. Past days can't be swapped; use `reassign`
+  to correct the log.
+- **Menus and swaps**: dishes follow the cook to the other date. Eating out, leftovers and no dinner
+  belong to their date, so if either day has one, no menu moves (only the cooks swap).
 - Same inputs always give the same plan.
+
+### Tonight
+
+By default a rebuild (a presence sensor, a calendar, a cook change) can still change tonight's cook if
+tonight has no menu. Set **Tonight is fixed from** (for example a time before your 14:00 reminder) and
+from then on:
+
+- tonight can't be swapped (`reassign` still works, to correct it);
+- availability changes never change tonight's cook. You get a `dinnersense_conflict` event instead.
+
+Before that time tonight behaves like any other day. With a menu set, a day's cook is already fixed.
 
 ## Entities
 
@@ -158,6 +173,30 @@ conditions:
   them, and household members who don't cook aren't modelled.
 - Restaurants never produce "No X for N days" tips.
 
+### Editing dishes
+
+**Configure → Dishes and recipes** lists your dishes (and *New dish*). One form edits the name,
+aliases, tags, servings, ingredients, steps, timers, link and notes. Ingredients, steps and timers
+are one per line:
+
+```text
+Ingredients          Steps                      Timers (name, minutes, step)
+Tortillas x 8        Brown the beef             Beef, 8, 1
+Minced beef x 500 g  Warm the tortillas         Tortillas, 1.5, 2
+Lime
+```
+
+Empty fields clear that part of the recipe, and a *Delete this dish* box removes it (menus keep their
+title). To change a single ingredient from an automation or Developer tools, use `set_ingredient` and
+`remove_ingredient` instead of resending the whole recipe.
+
+### Last cooked
+
+The planned cook's last home-cooked dish is on every day entity and today/tomorrow sensor as
+`cook_last_dish`, `cook_last_date` and `cook_last_days_ago`, and on each score sensor as
+`last_cooked_dish`, `last_cooked_date` and `last_cooked_days_ago`. Eating out, leftovers and skipped
+days don't count, and tonight counts once it is done.
+
 ## Availability
 
 Per cook (Configure → Cooks and availability), any of:
@@ -215,25 +254,30 @@ given by name or id.
 | `get_plan` (`start?`, `end?`) | *Response*: planned dinners |
 | `get_history` (`start`, `end`) | *Response*: dinners up to today |
 | `set_menu` (`date`, `title?`, `dish_id?`, `kind?`, `going_out?`, `note?`, `rating?`) | Set or clear a menu, any date |
-| `create_dish`, `update_dish`, `delete_dish`, `list_dishes` | The dish library |
+| `create_dish`, `update_dish`, `delete_dish`, `list_dishes` | The dish library. `update_dish` replaces the whole recipe; an empty recipe clears it |
+| `set_ingredient` (`dish_id`, `name`, `quantity?`), `remove_ingredient` (`dish_id`, `name`) | Change one ingredient without resending the recipe. Matches by name; omit the quantity to keep it, send an empty one to remove it |
 | `set_unavailable` (`cook`, `start`, `end`), `clear_unavailable` (`cook`, `start?`, `end?`) | Manual away ranges |
 | `get_stats` (`period?`) | *Response*: days since each dish and tag, frequencies, streaks, unplanned days |
 | `generate_tips` | Refresh the tips now |
 | `add_ingredients_to_list` (`date?`, `todo_entity?`) | Ingredients to a todo list |
-| `import_from_entity` (`entity_id`, `days?`, `overwrite?`) | Seed past menus from an old entity's history |
+| `import_from_entity` (`entity_id?`, `cook_entity?`, `days?`, `overwrite?`) | Seed past menus and who cooked from old entities' history |
 
 ### Importing an old "today's dinner" helper
 
 ```yaml
 action: dinnersense.import_from_entity
 data:
-  entity_id: input_text.today_s_dinner
+  entity_id: input_text.today_s_dinner   # the menu
+  cook_entity: input_select.dinner_duty  # who cooked (optional)
   days: 10
 ```
 
-The last real value set on each day becomes that day's menu (empty, `unknown` and `unavailable` are
-ignored). Days that already have a menu are skipped unless `overwrite: true`. The recorder usually
-keeps about 10 days, so this is a one-off rescue.
+The last real value set on each day becomes that day's menu, and the cook entity's value (matched to
+your cooks by name) becomes who cooked. Empty, `unknown` and `unavailable` values are ignored. Days
+that already have a menu are skipped, and an existing cook is kept, unless `overwrite: true`. Names
+that aren't one of your cooks are reported as `unknown_cook`. A day with a cook but no menu gets a
+record too, and imported cooks count in the scores and in "last cooked". The recorder usually keeps
+about 10 days, so this is a one-off rescue.
 
 ## Events
 
@@ -241,9 +285,9 @@ All carry `config_entry_id`.
 
 | Event | When | Data |
 |---|---|---|
-| `dinnersense_changed` | Any change to dinners | `before` and `after` (lists of dinners) for edits, swaps and imports. Bulk rebuilds send `reason` (`regenerate` or `availability`) and `rebuilt` (a count) instead; imports also send `reason: import` |
+| `dinnersense_changed` | A change to dinners that actually changed something | `before` and `after` (lists of dinners) for edits, swaps and imports. Bulk rebuilds send `reason` (`regenerate` or `availability`) and `rebuilt` (a count) instead; imports also send `reason: import` |
 | `dinnersense_swapped` | A swap | `before`, `after` |
-| `dinnersense_rolled` | The nightly roll | `date`, `closed`, `added` |
+| `dinnersense_rolled` | The nightly roll, and a start-up that had something to close or add. A restart with nothing to do is silent | `date`, `closed`, `added` |
 | `dinnersense_conflict` | A locked dinner's cook became unavailable | `date`, `cook`, `cook_name` |
 
 Every change is applied, saved and announced as one step, so automations never see half-applied
@@ -344,6 +388,10 @@ primary: >
   {{ state_attr('select.amarula_dinner_day_3', 'weekday') }} – {{ states('select.amarula_dinner_day_3') }}
 secondary: >
   {{ state_attr('select.amarula_dinner_day_3', 'menu_title') or 'No menu yet' }}
+  {% if state_attr('select.amarula_dinner_day_3', 'cook_last_dish') %}
+  · last: {{ state_attr('select.amarula_dinner_day_3', 'cook_last_dish') }}
+  ({{ state_attr('select.amarula_dinner_day_3', 'cook_last_days_ago') }} d ago)
+  {% endif %}
 icon: mdi:chef-hat
 icon_color: "{{ state_attr('select.amarula_dinner_day_3', 'color') or 'grey' }}"
 badge_icon: "{{ 'mdi:lock' if state_attr('select.amarula_dinner_day_3', 'locked') else '' }}"
@@ -391,11 +439,11 @@ dashboards.
 - Cooks are edited as a list of names in the options flow; reordering is by editing the list, and
   renaming a cook makes a new cook.
 - Auto-creating dishes from new menu titles exists as a setting but isn't in the options UI yet.
+- Dishes are edited in Configure → Dishes and recipes (or with the services). The editor shows
+  ingredients, steps and timers as plain text lines.
 - Select and text entities are created for the configured horizon, so changing it reloads the
   integration.
 - Day-slot entities show the weekday and date in their attributes, not in their names.
-- Stats such as "last: Tacos" per cook are available from `get_stats` (a response service), not as
-  entity attributes.
 - Every `done` dinner counts as a turn in the scores, including eating out and leftovers.
 - Dinners become `done` at the nightly roll, so a score doesn't count tonight's dinner until then.
 
