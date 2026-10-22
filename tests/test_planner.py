@@ -1,36 +1,14 @@
-"""Planner tests. The planner is HA-free, but it lives in the component package,
-so it is loaded by file path with the package stubbed out."""
+"""Planner tests (the planner itself has no Home Assistant imports)."""
 
 from __future__ import annotations
 
-import importlib.util
-import sys
-import types
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parent.parent
+from custom_components.dinnersense import models
+from custom_components.dinnersense import planner as planner_mod
 
-
-def _load():
-    pkg = types.ModuleType("dinnersense_pkg")
-    pkg.__path__ = [str(ROOT)]
-    sys.modules["dinnersense_pkg"] = pkg
-    for name in ("rotation", "models", "planner"):
-        full = f"dinnersense_pkg.{name}"
-        target = ROOT / name / "__init__.py" if name == "rotation" else ROOT / f"{name}.py"
-        spec = importlib.util.spec_from_file_location(
-            full, target, submodule_search_locations=[str(ROOT / name)] if name == "rotation" else None
-        )
-        mod = importlib.util.module_from_spec(spec)
-        sys.modules[full] = mod
-        spec.loader.exec_module(mod)
-    return sys.modules["dinnersense_pkg.planner"], sys.modules["dinnersense_pkg.models"]
-
-
-planner_mod, models = _load()
 TODAY = date(2026, 3, 2)
 
 
@@ -179,3 +157,141 @@ def test_dinner_roundtrips_through_dict():
     d = h.planner.dinners[TODAY]
     d.menu = models.MenuEntry(title="Tacos", rating=4)
     assert models.Dinner.from_dict(d.to_dict()) == d
+
+
+# -- menus and dishes -------------------------------------------------------
+
+
+def days(n):
+    return TODAY + timedelta(days=n)
+
+
+def test_set_menu_free_text_for_future_day():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.set_menu(days(3), TODAY, title="Pizza from Bella", kind="eating_out")
+    menu = h.planner.dinners[days(3)].menu
+    assert (menu.title, menu.dish_id, menu.kind) == ("Pizza from Bella", None, "eating_out")
+    assert h.events[-1][0] == "dinnersense_changed"
+    assert h.events[-1][1]["after"][0]["menu"]["title"] == "Pizza from Bella"
+
+
+def test_typing_a_known_name_or_alias_links_the_dish_case_insensitively():
+    h = Harness()
+    h.planner.roll(TODAY)
+    dish = h.planner.create_dish("Tacos", aliases=["Taco night"])
+    h.planner.set_menu(days(1), TODAY, title="tacos")
+    h.planner.set_menu(days(2), TODAY, title="TACO NIGHT")
+    for n in (1, 2):
+        menu = h.planner.dinners[days(n)].menu
+        assert menu.dish_id == dish.id and menu.title == "Tacos"
+
+
+def test_unknown_title_does_not_create_dish_by_default():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.set_menu(days(1), TODAY, title="Moose stew")
+    assert h.planner.dishes == {}
+
+
+def test_auto_create_dishes_when_enabled():
+    h = Harness(auto_create_dishes=True)
+    h.planner.roll(TODAY)
+    h.planner.set_menu(days(1), TODAY, title="Moose stew")
+    assert h.planner.dinners[days(1)].menu.dish_id == "moose_stew"
+    assert "moose_stew" in h.planner.dishes
+
+
+def test_set_menu_by_dish_id_and_unknown_dish_refused():
+    h = Harness()
+    h.planner.roll(TODAY)
+    d = h.planner.create_dish("Soup")
+    h.planner.set_menu(days(1), TODAY, dish_id=d.id)
+    assert h.planner.dinners[days(1)].menu.title == "Soup"
+    with pytest.raises(planner_mod.PlannerError):
+        h.planner.set_menu(days(1), TODAY, dish_id="nope")
+
+
+def test_clear_menu():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.set_menu(days(1), TODAY, title="X")
+    h.planner.set_menu(days(1), TODAY)
+    assert h.planner.dinners[days(1)].menu is None
+
+
+def test_edit_past_menu_persists_through_roll():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.roll(days(3))
+    h.planner.set_menu(days(0), days(3), title="Pasta", rating=4)
+    h.planner.roll(days(4))
+    menu = h.planner.dinners[days(0)].menu
+    assert (menu.title, menu.rating) == ("Pasta", 4)
+
+
+def test_menu_for_day_before_the_integration_creates_log_record():
+    h = Harness()
+    h.planner.roll(TODAY)
+    old = TODAY - timedelta(days=20)
+    h.planner.set_menu(old, TODAY, title="Burger")
+    d = h.planner.dinners[old]
+    assert d.status == "done" and d.cook == "" and d.menu.title == "Burger"
+    h.planner.roll(TODAY)  # roll must cope with the unknown-cook record
+    assert len(h.planner.dinners) == 11
+
+
+def test_menu_beyond_horizon_extends_plan_and_far_future_is_refused():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.set_menu(days(15), TODAY, title="Midsummer")
+    assert h.planner.dinners[days(15)].cook in {"ann", "bob", "cy"}
+    assert len({days(i) for i in range(16)} - set(h.planner.dinners)) == 0
+    with pytest.raises(planner_mod.PlannerError):
+        h.planner.set_menu(days(90), TODAY, title="x")
+
+
+def test_bad_kind_and_rating_refused():
+    h = Harness()
+    h.planner.roll(TODAY)
+    with pytest.raises(planner_mod.PlannerError):
+        h.planner.set_menu(days(1), TODAY, title="x", kind="picnic")
+    with pytest.raises(planner_mod.PlannerError):
+        h.planner.set_menu(days(1), TODAY, title="x", rating=9)
+
+
+def test_duplicate_dish_refused_and_rename_updates_menus():
+    h = Harness()
+    h.planner.roll(TODAY)
+    d = h.planner.create_dish("Tacos")
+    with pytest.raises(planner_mod.PlannerError):
+        h.planner.create_dish("tacos")
+    h.planner.set_menu(days(1), TODAY, dish_id=d.id)
+    h.planner.update_dish(d.id, name="Fish tacos")
+    assert h.planner.dinners[days(1)].menu.title == "Fish tacos"
+
+
+def test_delete_dish_keeps_menu_title():
+    h = Harness()
+    h.planner.roll(TODAY)
+    d = h.planner.create_dish("Tacos")
+    h.planner.set_menu(days(1), TODAY, dish_id=d.id)
+    h.planner.delete_dish(d.id)
+    menu = h.planner.dinners[days(1)].menu
+    assert menu.dish_id is None and menu.title == "Tacos"
+
+
+def test_get_history_stops_at_today():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.roll(days(3))
+    got = h.planner.get_history(days(0), days(9), days(3))
+    assert [d.date for d in got] == [days(i) for i in range(4)]
+
+
+def test_swap_menu_follows_cook_event_carries_menu():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.set_menu(days(3), TODAY, title="Tacos")
+    h.planner.swap(days(3), "cy", TODAY)
+    assert h.planner.dinners[days(2)].menu.title == "Tacos"

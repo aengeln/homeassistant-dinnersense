@@ -19,7 +19,7 @@ from .store import HouseholdStore
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.SENSOR, Platform.SELECT]
+PLATFORMS = [Platform.CALENDAR, Platform.SELECT, Platform.SENSOR, Platform.TEXT]
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -29,7 +29,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: DinnerSenseConfigEntry) -> bool:
     store = HouseholdStore(hass, entry.entry_id)
-    dinners, debt = await store.async_load()
+    dinners, debt, dishes = await store.async_load()
     cooks = [Cook.from_dict(c) for c in entry.options.get(CONF_COOKS, [])]
     settings = Settings.from_dict(entry.options.get(CONF_SETTINGS, {}))
 
@@ -42,11 +42,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: DinnerSenseConfigEntry) 
     holder: list[Planner] = []
 
     def save() -> None:
-        p = holder[0]
-        store.schedule_save(p.dinners, p.debt, p.cooks)
+        store.schedule_save(holder[0])
 
     planner = Planner(
-        cooks, settings, dinners, debt, fire_event=fire, save=save, now=now
+        cooks, settings, dinners, debt, dishes, fire_event=fire, save=save, now=now
     )
     holder.append(planner)
     entry.runtime_data = DinnerSenseData(planner, store)
@@ -95,7 +94,5 @@ async def async_unload_entry(
 ) -> bool:
     if unloaded := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         planner = entry.runtime_data.planner
-        await entry.runtime_data.store.async_save_now(
-            planner.dinners, planner.debt, planner.cooks
-        )
+        await entry.runtime_data.store.async_save_now(planner)
     return unloaded

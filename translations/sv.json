@@ -46,6 +46,14 @@
         "done": "Gjort",
         "missed": "Missad"
       }
+    },
+    "menu_kind": {
+      "options": {
+        "home": "Hemlagat",
+        "eating_out": "Äta ute",
+        "leftovers": "Rester",
+        "skip": "Ingen middag"
+      }
     }
   },
   "entity": {
@@ -60,6 +68,16 @@
     "select": {
       "dinner_day": {
         "name": "Middag dag {n}"
+      }
+    },
+    "text": {
+      "dinner_menu_day": {
+        "name": "Middagsmeny dag {n}"
+      }
+    },
+    "calendar": {
+      "dinner_calendar": {
+        "name": "Middag"
       }
     }
   },
@@ -152,6 +170,138 @@
         },
         "end": {
           "name": "Slut",
+          "description": ""
+        }
+      }
+    },
+    "get_history": {
+      "name": "Hämta historik",
+      "description": "Returnera tidigare middagar (inklusive idag) i ett datumintervall.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
+          "description": ""
+        },
+        "start": {
+          "name": "Start",
+          "description": ""
+        },
+        "end": {
+          "name": "Slut",
+          "description": ""
+        }
+      }
+    },
+    "set_menu": {
+      "name": "Sätt meny",
+      "description": "Sätt eller rensa menyn för valfri dag. En titel som matchar en rätt länkas. Ange inget för att rensa.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
+          "description": ""
+        },
+        "date": {
+          "name": "Datum",
+          "description": ""
+        },
+        "title": {
+          "name": "Titel",
+          "description": ""
+        },
+        "dish_id": {
+          "name": "Rätt-ID",
+          "description": ""
+        },
+        "kind": {
+          "name": "Typ",
+          "description": ""
+        },
+        "note": {
+          "name": "Anteckning",
+          "description": ""
+        },
+        "rating": {
+          "name": "Betyg",
+          "description": ""
+        }
+      }
+    },
+    "create_dish": {
+      "name": "Skapa rätt",
+      "description": "Lägg till en rätt i biblioteket.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
+          "description": ""
+        },
+        "name": {
+          "name": "Namn",
+          "description": ""
+        },
+        "aliases": {
+          "name": "Alias",
+          "description": ""
+        },
+        "tags": {
+          "name": "Taggar",
+          "description": ""
+        },
+        "recipe": {
+          "name": "Recept",
+          "description": ""
+        }
+      }
+    },
+    "update_dish": {
+      "name": "Uppdatera rätt",
+      "description": "Ändra en rätt i biblioteket.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
+          "description": ""
+        },
+        "dish_id": {
+          "name": "Rätt-ID",
+          "description": ""
+        },
+        "name": {
+          "name": "Namn",
+          "description": ""
+        },
+        "aliases": {
+          "name": "Alias",
+          "description": ""
+        },
+        "tags": {
+          "name": "Taggar",
+          "description": ""
+        },
+        "recipe": {
+          "name": "Recept",
+          "description": ""
+        }
+      }
+    },
+    "delete_dish": {
+      "name": "Ta bort rätt",
+      "description": "Ta bort en rätt. Tidigare menyer behåller sin titel.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
+          "description": ""
+        },
+        "dish_id": {
+          "name": "Rätt-ID",
+          "description": ""
+        }
+      }
+    },
+    "list_dishes": {
+      "name": "Lista rätter",
+      "description": "Returnera alla rätter i biblioteket.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
           "description": ""
         }
       }

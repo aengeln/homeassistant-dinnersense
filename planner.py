@@ -12,6 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 from .models import (
+    MENU_KINDS,
     STATUS_DONE,
     STATUS_MISSED,
     STATUS_PLANNED,
@@ -20,7 +21,10 @@ from .models import (
     ChangeRecord,
     Cook,
     Dinner,
+    Dish,
+    MenuEntry,
     Settings,
+    slugify,
 )
 from .rotation import (
     Assignment,
@@ -33,6 +37,8 @@ from .rotation import (
 EVENT_CHANGED = "dinnersense_changed"
 EVENT_SWAPPED = "dinnersense_swapped"
 EVENT_ROLLED = "dinnersense_rolled"
+
+MAX_FUTURE_DAYS = 60
 
 FireEvent = Callable[[str, dict[str, Any]], None]
 
@@ -48,6 +54,7 @@ class Planner:
         settings: Settings,
         dinners: dict[date, Dinner] | None = None,
         debt: dict[str, int] | None = None,
+        dishes: dict[str, Dish] | None = None,
         *,
         fire_event: FireEvent,
         save: Callable[[], None],
@@ -57,6 +64,7 @@ class Planner:
         self.settings = settings
         self.dinners: dict[date, Dinner] = dinners or {}
         self.debt: dict[str, int] = debt or {}
+        self.dishes: dict[str, Dish] = dishes or {}
         self._fire = fire_event
         self._save = save
         self._now = now
@@ -92,6 +100,22 @@ class Planner:
 
     def get_plan(self, start: date, end: date) -> list[Dinner]:
         return [d for day, d in sorted(self.dinners.items()) if start <= day <= end]
+
+    def get_history(self, start: date, end: date, today: date) -> list[Dinner]:
+        """Dinners up to and including today within the range."""
+        return self.get_plan(start, min(end, today))
+
+    def find_dish(self, title: str) -> Dish | None:
+        return next((d for d in self.dishes.values() if d.matches(title)), None)
+
+    def menu_title(self, dinner: Dinner) -> str | None:
+        menu = dinner.menu
+        if menu is None:
+            return None
+        if menu.title:
+            return menu.title
+        dish = self.dishes.get(menu.dish_id) if menu.dish_id else None
+        return dish.name if dish else None
 
     # -- roll / generation -------------------------------------------------------
 
@@ -231,6 +255,136 @@ class Planner:
             [(EVENT_CHANGED, {"before": [before], "after": [_snapshot(dinner)]})]
         )
 
+    def set_menu(
+        self,
+        day: date,
+        today: date,
+        *,
+        title: str | None = None,
+        dish_id: str | None = None,
+        kind: str | None = None,
+        note: str | None = None,
+        rating: int | None = None,
+    ) -> None:
+        """Set, update or clear the menu of any day: past, today or future.
+
+        Giving neither ``title`` nor ``dish_id`` (and no other field) clears the
+        menu. A title that matches a dish name or alias links that dish.
+        """
+        if kind is not None and kind not in MENU_KINDS:
+            raise PlannerError(f"Unknown kind: {kind}")
+        if rating is not None and not 1 <= rating <= 5:
+            raise PlannerError("rating must be 1-5")
+        dinner = self._dinner_for_menu(day, today)
+        before = _snapshot(dinner)
+        title = (title or "").strip() or None
+
+        if title is None and dish_id is None and kind is None and note is None \
+                and rating is None:
+            dinner.menu = None
+        else:
+            menu = dinner.menu or MenuEntry()
+            if dish_id is not None:
+                dish = self.dishes.get(dish_id)
+                if dish is None:
+                    raise PlannerError(f"Unknown dish: {dish_id}")
+                menu.dish_id, menu.title = dish.id, dish.name
+            elif title is not None:
+                dish = self.find_dish(title)
+                if dish is None and self.settings.auto_create_dishes:
+                    dish = self._create_dish(title)
+                menu.dish_id = dish.id if dish else None
+                menu.title = dish.name if dish else title
+            if kind is not None:
+                menu.kind = kind
+            if note is not None:
+                menu.note = note or None
+            if rating is not None:
+                menu.rating = rating
+            dinner.menu = menu
+        dinner.history.append(
+            ChangeRecord(self._stamp(), "menu", {"title": self.menu_title(dinner)})
+        )
+        self._commit(
+            [(EVENT_CHANGED, {"before": [before], "after": [_snapshot(dinner)]})]
+        )
+
+    def _dinner_for_menu(self, day: date, today: date) -> Dinner:
+        if day in self.dinners:
+            return self.dinners[day]
+        if day < today:
+            # A day from before the integration ran: keep a log-only record.
+            dinner = Dinner(
+                id=uuid4().hex, date=day, cook="", status=STATUS_DONE
+            )
+            self.dinners[day] = dinner
+            return dinner
+        if (day - today).days >= MAX_FUTURE_DAYS:
+            raise PlannerError(f"Too far ahead (limit {MAX_FUTURE_DAYS} days)")
+        if day.weekday() not in self.settings.dinner_days:
+            raise PlannerError(f"{day} is not a dinner day")
+        result = self.engine.generate(
+            _to_plan(self.dinners), today, (day - today).days + 1, self.debt
+        )
+        self.debt = result.debt
+        for a in result.added:
+            self.dinners[a.date] = Dinner(
+                id=uuid4().hex, date=a.date, cook=a.cook_id, repay=a.repay
+            )
+        return self.dinners[day]
+
+    # -- dishes ------------------------------------------------------------------
+
+    def _create_dish(self, name: str, **fields: Any) -> Dish:
+        base, dish_id, i = slugify(name, "dish"), "", 2
+        dish_id = base
+        while dish_id in self.dishes:
+            dish_id, i = f"{base}_{i}", i + 1
+        stamp = self._stamp()
+        dish = Dish(dish_id, name.strip(), created=stamp, updated=stamp, **fields)
+        self.dishes[dish_id] = dish
+        return dish
+
+    def create_dish(
+        self,
+        name: str,
+        aliases: list[str] | None = None,
+        tags: list[str] | None = None,
+        recipe: dict[str, Any] | None = None,
+    ) -> Dish:
+        if not name.strip():
+            raise PlannerError("A dish needs a name")
+        if self.find_dish(name):
+            raise PlannerError(f"A dish called '{name}' already exists")
+        dish = self._create_dish(
+            name, aliases=aliases or [], tags=tags or [], recipe=recipe
+        )
+        self._commit([])
+        return dish
+
+    def update_dish(self, dish_id: str, **changes: Any) -> Dish:
+        dish = self.dishes.get(dish_id)
+        if dish is None:
+            raise PlannerError(f"Unknown dish: {dish_id}")
+        for key in ("name", "aliases", "tags", "recipe"):
+            if changes.get(key) is not None:
+                setattr(dish, key, changes[key])
+        dish.updated = self._stamp()
+        for dinner in self.dinners.values():
+            if dinner.menu and dinner.menu.dish_id == dish_id:
+                dinner.menu.title = dish.name
+        self._commit([])
+        return dish
+
+    def delete_dish(self, dish_id: str) -> None:
+        if self.dishes.pop(dish_id, None) is None:
+            raise PlannerError(f"Unknown dish: {dish_id}")
+        # Menus keep their title so history stays readable.
+        for dinner in self.dinners.values():
+            if dinner.menu and dinner.menu.dish_id == dish_id:
+                dinner.menu.dish_id = None
+        self._commit([])
+
     def skip(self, day: date) -> None:
         self.set_status(day, STATUS_SKIPPED)
 
@@ -280,5 +434,6 @@ def _snapshot(dinner: Dinner) -> dict[str, Any]:
         "cook": dinner.cook,
         "status": dinner.status,
         "locked": dinner.locked,
+        "menu": dinner.menu.to_dict() if dinner.menu else None,
     }
 

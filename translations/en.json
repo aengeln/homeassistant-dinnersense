@@ -46,6 +46,14 @@
         "done": "Done",
         "missed": "Missed"
       }
+    },
+    "menu_kind": {
+      "options": {
+        "home": "Home cooked",
+        "eating_out": "Eating out",
+        "leftovers": "Leftovers",
+        "skip": "No dinner"
+      }
     }
   },
   "entity": {
@@ -60,6 +68,16 @@
     "select": {
       "dinner_day": {
         "name": "Dinner day {n}"
+      }
+    },
+    "text": {
+      "dinner_menu_day": {
+        "name": "Dinner menu day {n}"
+      }
+    },
+    "calendar": {
+      "dinner_calendar": {
+        "name": "Dinner"
       }
     }
   },
@@ -152,6 +170,138 @@
         },
         "end": {
           "name": "End",
+          "description": ""
+        }
+      }
+    },
+    "get_history": {
+      "name": "Get history",
+      "description": "Return past dinners (including today) in a date range.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
+          "description": ""
+        },
+        "start": {
+          "name": "Start",
+          "description": ""
+        },
+        "end": {
+          "name": "End",
+          "description": ""
+        }
+      }
+    },
+    "set_menu": {
+      "name": "Set menu",
+      "description": "Set or clear the menu of any day, past or future. A title matching a dish links it. Give nothing to clear.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
+          "description": ""
+        },
+        "date": {
+          "name": "Date",
+          "description": ""
+        },
+        "title": {
+          "name": "Title",
+          "description": ""
+        },
+        "dish_id": {
+          "name": "Dish ID",
+          "description": ""
+        },
+        "kind": {
+          "name": "Kind",
+          "description": ""
+        },
+        "note": {
+          "name": "Note",
+          "description": ""
+        },
+        "rating": {
+          "name": "Rating",
+          "description": ""
+        }
+      }
+    },
+    "create_dish": {
+      "name": "Create dish",
+      "description": "Add a dish to the library.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
+          "description": ""
+        },
+        "name": {
+          "name": "Name",
+          "description": ""
+        },
+        "aliases": {
+          "name": "Aliases",
+          "description": ""
+        },
+        "tags": {
+          "name": "Tags",
+          "description": ""
+        },
+        "recipe": {
+          "name": "Recipe",
+          "description": ""
+        }
+      }
+    },
+    "update_dish": {
+      "name": "Update dish",
+      "description": "Change a dish in the library.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
+          "description": ""
+        },
+        "dish_id": {
+          "name": "Dish ID",
+          "description": ""
+        },
+        "name": {
+          "name": "Name",
+          "description": ""
+        },
+        "aliases": {
+          "name": "Aliases",
+          "description": ""
+        },
+        "tags": {
+          "name": "Tags",
+          "description": ""
+        },
+        "recipe": {
+          "name": "Recipe",
+          "description": ""
+        }
+      }
+    },
+    "delete_dish": {
+      "name": "Delete dish",
+      "description": "Remove a dish. Past menus keep their title.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
+          "description": ""
+        },
+        "dish_id": {
+          "name": "Dish ID",
+          "description": ""
+        }
+      }
+    },
+    "list_dishes": {
+      "name": "List dishes",
+      "description": "Return all dishes in the library.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
           "description": ""
         }
       }

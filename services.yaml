@@ -46,3 +46,74 @@ get_plan:
       selector: { date: }
     end:
       selector: { date: }
+get_history:
+  fields:
+    config_entry_id:
+      selector: { config_entry: { integration: dinnersense } }
+    start:
+      required: true
+      selector: { date: }
+    end:
+      required: true
+      selector: { date: }
+set_menu:
+  fields:
+    config_entry_id:
+      selector: { config_entry: { integration: dinnersense } }
+    date:
+      required: true
+      selector: { date: }
+    title:
+      example: "Tacos"
+      selector: { text: }
+    dish_id:
+      selector: { text: }
+    kind:
+      selector:
+        select:
+          options: [home, eating_out, leftovers, skip]
+          translation_key: menu_kind
+    note:
+      selector: { text: }
+    rating:
+      selector: { number: { min: 1, max: 5, mode: box } }
+create_dish:
+  fields:
+    config_entry_id:
+      selector: { config_entry: { integration: dinnersense } }
+    name:
+      required: true
+      example: "Tacos"
+      selector: { text: }
+    aliases:
+      selector: { text: { multiple: true } }
+    tags:
+      selector: { text: { multiple: true } }
+    recipe:
+      selector: { object: }
+update_dish:
+  fields:
+    config_entry_id:
+      selector: { config_entry: { integration: dinnersense } }
+    dish_id:
+      required: true
+      selector: { text: }
+    name:
+      selector: { text: }
+    aliases:
+      selector: { text: { multiple: true } }
+    tags:
+      selector: { text: { multiple: true } }
+    recipe:
+      selector: { object: }
+delete_dish:
+  fields:
+    config_entry_id:
+      selector: { config_entry: { integration: dinnersense } }
+    dish_id:
+      required: true
+      selector: { text: }
+list_dishes:
+  fields:
+    config_entry_id:
+      selector: { config_entry: { integration: dinnersense } }

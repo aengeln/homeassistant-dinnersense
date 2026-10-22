@@ -6,7 +6,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from rotation import (
+from custom_components.dinnersense.rotation import (
     AvailabilityWindow,
     NoUpcomingDinner,
     PastDinner,

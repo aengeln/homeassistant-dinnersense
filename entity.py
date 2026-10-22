@@ -48,7 +48,7 @@ class DinnerSenseEntity(Entity):
             "locked": dinner.locked,
             "cook_id": dinner.cook,
             "color": cook.color if cook else None,
-            "menu_title": menu.title if menu else None,
+            "menu_title": self.planner.menu_title(dinner),
             "dish_id": menu.dish_id if menu else None,
             "kind": menu.kind if menu else None,
             "note": menu.note if menu else None,

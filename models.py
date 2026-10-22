@@ -45,6 +45,31 @@ class MenuEntry:
         return cls(**data)
 
 
+MENU_KINDS = ("home", "eating_out", "leftovers", "skip")
+
+
+@dataclass
+class Dish:
+    id: str
+    name: str
+    aliases: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+    recipe: dict[str, Any] | None = None
+    created: str = ""
+    updated: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return dict(self.__dict__)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Dish:
+        return cls(**data)
+
+    def matches(self, title: str) -> bool:
+        wanted = title.strip().casefold()
+        return wanted in {self.name.casefold(), *(a.casefold() for a in self.aliases)}
+
+
 @dataclass
 class ChangeRecord:
     at: str  # ISO timestamp
@@ -116,10 +141,10 @@ class Settings:
         return cls(**{k: v for k, v in data.items() if k in known})
 
 
-def _slug(name: str) -> str:
+def slugify(name: str, fallback: str = "item") -> str:
     import re
 
-    return re.sub(r"[^a-z0-9]+", "_", name.casefold()).strip("_") or "cook"
+    return re.sub(r"[^a-z0-9]+", "_", name.casefold()).strip("_") or fallback
 
 
 def build_cooks(names: list[str], existing: list[Cook] | None = None) -> list[Cook]:
@@ -132,7 +157,7 @@ def build_cooks(names: list[str], existing: list[Cook] | None = None) -> list[Co
         if previous and previous.id not in used:
             cook = Cook(previous.id, raw, order, previous.person_entity, previous.color)
         else:
-            base = _slug(raw)
+            base = slugify(raw, "cook")
             cook_id, i = base, 2
             while cook_id in used:
                 cook_id, i = f"{base}_{i}", i + 1

@@ -9,7 +9,8 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
 
 from .const import DOMAIN
-from .models import Cook, Dinner
+from .models import Dinner, Dish
+from .planner import Planner
 
 STORAGE_VERSION = 1
 SAVE_DELAY = 1
@@ -37,34 +38,27 @@ class HouseholdStore:
 
     async def async_load(
         self,
-    ) -> tuple[dict[date, Dinner], dict[str, int]]:
+    ) -> tuple[dict[date, Dinner], dict[str, int], dict[str, Dish]]:
         data = await self._store.async_load()
         if not data:
-            return {}, {}
+            return {}, {}, {}
         dinners = {
             d.date: d for d in (Dinner.from_dict(x) for x in data.get("dinners", []))
         }
-        return dinners, dict(data.get("debt", {}))
+        dishes = {d.id: d for d in (Dish.from_dict(x) for x in data.get("dishes", []))}
+        return dinners, dict(data.get("debt", {})), dishes
 
-    def schedule_save(
-        self, dinners: dict[date, Dinner], debt: dict[str, int], cooks: list[Cook]
-    ) -> None:
-        self._store.async_delay_save(
-            lambda: {
-                "dinners": [d.to_dict() for _, d in sorted(dinners.items())],
-                "debt": dict(debt),
-                "cooks": [c.to_dict() for c in cooks],
-            },
-            SAVE_DELAY,
-        )
+    @staticmethod
+    def _payload(planner: Planner) -> dict[str, Any]:
+        return {
+            "dinners": [d.to_dict() for _, d in sorted(planner.dinners.items())],
+            "debt": dict(planner.debt),
+            "cooks": [c.to_dict() for c in planner.cooks],
+            "dishes": [d.to_dict() for d in planner.dishes.values()],
+        }
 
-    async def async_save_now(
-        self, dinners: dict[date, Dinner], debt: dict[str, int], cooks: list[Cook]
-    ) -> None:
-        await self._store.async_save(
-            {
-                "dinners": [d.to_dict() for _, d in sorted(dinners.items())],
-                "debt": dict(debt),
-                "cooks": [c.to_dict() for c in cooks],
-            }
-        )
+    def schedule_save(self, planner: Planner) -> None:
+        self._store.async_delay_save(lambda: self._payload(planner), SAVE_DELAY)
+
+    async def async_save_now(self, planner: Planner) -> None:
+        await self._store.async_save(self._payload(planner))
