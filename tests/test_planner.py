@@ -332,15 +332,27 @@ def test_away_cook_gets_no_dinners_in_range_and_counts_even_out_after():
 def test_rebuild_keeps_menus_ids_and_locked_days():
     h = Harness()
     h.planner.roll(TODAY)
-    h.planner.set_menu(days(1), TODAY, title="Soup")
+    h.planner.set_menu(days(1), TODAY, title="Soup")  # Bob's day
     ident = h.planner.dinners[days(1)].id
     h.planner.reassign(days(2), "ann")  # locked
     h.planner.add_unavailable("bob", days(0), days(3), TODAY)
     kept = h.planner.dinners[days(1)]
-    assert kept.id == ident and kept.menu.title == "Soup" and kept.cook != "bob"
+    # A planned dish keeps its cook; the conflict is reported, not "fixed".
+    assert kept.id == ident and kept.menu.title == "Soup" and kept.cook == "bob"
+    assert kept.locked
     assert (
         h.planner.dinners[days(2)].cook == "ann" and h.planner.dinners[days(2)].locked
     )
+    assert [c["date"] for c in conflicts(h)] == [days(1).isoformat()]
+
+
+def test_menu_is_kept_when_its_cook_is_removed():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.set_menu(days(1), TODAY, title="Soup")  # Bob's day
+    h.planner.set_cooks([c for c in h.planner.cooks if c.id != "bob"], TODAY)
+    d = h.planner.dinners[days(1)]
+    assert d.menu.title == "Soup" and d.cook in {"ann", "cy"}
 
 
 def test_clear_unavailable_restores_the_original_plan():
@@ -578,3 +590,63 @@ def test_eating_out_never_changes_the_rotation_and_is_a_turn():
     assert h.planner.cook_stats("ann", days(2))["cooked_30"] == 1
     assert h.planner.cook_stats("bob", days(2))["cooked_30"] == 1
     assert h.planner.debt == {}
+
+
+# -- a menu locks the day ----------------------------------------------------------
+
+
+def test_setting_a_menu_locks_the_day_but_a_bare_home_does_not():
+    h = Harness()
+    h.planner.roll(TODAY)
+    assert not h.planner.dinners[days(1)].locked
+    h.planner.set_menu(days(1), TODAY, kind="home")  # nothing decided
+    assert not h.planner.dinners[days(1)].locked
+    h.planner.set_menu(days(1), TODAY, title="Soup")
+    assert h.planner.dinners[days(1)].locked
+    h.planner.set_menu(days(2), TODAY, kind="eating_out")
+    h.planner.set_menu(days(3), TODAY, kind="leftovers")
+    assert h.planner.dinners[days(2)].locked and h.planner.dinners[days(3)].locked
+
+
+def test_a_planned_dish_survives_any_rebuild_with_its_cook():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.set_menu(TODAY, TODAY, title="Tonight's pasta")  # Ann cooks tonight
+    cook = h.planner.dinners[TODAY].cook
+    h.planner.add_unavailable("ann", days(0), days(0), TODAY)  # e.g. a live sensor
+    h.planner.regenerate(TODAY)
+    h.planner.set_cooks(list(h.planner.cooks), TODAY)
+    assert h.planner.dinners[TODAY].cook == cook == "ann"
+
+
+def test_clearing_a_menu_unlocks_unless_swapped_or_reassigned():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.set_menu(days(1), TODAY, title="Soup")
+    h.planner.set_menu(days(1), TODAY)
+    assert not h.planner.dinners[days(1)].locked
+    h.planner.reassign(days(2), "ann")
+    h.planner.set_menu(days(2), TODAY, title="Pie")
+    h.planner.set_menu(days(2), TODAY)
+    assert h.planner.dinners[days(2)].locked  # still locked by the reassign
+
+
+def test_menus_saved_before_this_rule_get_locked_on_roll():
+    h = Harness()
+    h.planner.roll(TODAY)
+    d = h.planner.dinners[days(1)]
+    d.menu = models.MenuEntry(title="Old soup")  # as an older version stored it
+    assert not d.locked
+    h.planner.roll(TODAY)
+    assert d.locked and d.history[-1].action == "locked"
+    h.planner.add_unavailable(d.cook, days(0), days(3), TODAY)
+    assert h.planner.dinners[days(1)].cook == d.cook
+
+
+def test_past_menus_do_not_matter_for_rebuilds():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.roll(days(3))
+    h.planner.set_menu(days(0), days(3), title="Old")
+    h.planner.regenerate(days(3))
+    assert h.planner.dinners[days(0)].menu.title == "Old"

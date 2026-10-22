@@ -1095,3 +1095,33 @@ async def test_broken_availability_sources_never_stop_setup(hass, freezer) -> No
     assert entry.state.value == "loaded"
     assert hass.states.get("sensor.test_household_dinner_today").state == "Ann"
     assert len(_slot_cooks(hass)) == 10
+
+
+async def test_planned_dish_keeps_its_cook_when_availability_appears_at_boot(
+    hass, freezer, hass_storage
+) -> None:
+    """The field incident: a menu is set, then a reboot brings availability data."""
+    freezer.move_to(NOW)
+    entry = _entry_with(
+        hass,
+        {"ann": [{"type": "binary_sensor", "entity_id": "binary_sensor.ann_away"}]},
+    )
+    await _setup(hass, entry)  # the sensor does not exist yet: no windows
+    assert hass.states.get("sensor.test_household_dinner_today").state == "Ann"
+    await hass.services.async_call(
+        DOMAIN, "set_menu", {"date": "2026-03-02", "title": "Pasta"}, blocking=True
+    )
+    freezer.tick(timedelta(seconds=5))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+    conflicts = async_capture_events(hass, "dinnersense_conflict")
+    hass.states.async_set("binary_sensor.ann_away", "on")  # ready before the reboot
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert hass.states.get("text.test_household_dinner_menu_day_0").state == "Pasta"
+    assert hass.states.get("sensor.test_household_dinner_today").state == "Ann"
+    assert hass.states.get("select.test_household_dinner_day_0").attributes["locked"]
+    assert [c.data["date"] for c in conflicts] == ["2026-03-02"]

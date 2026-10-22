@@ -137,6 +137,7 @@ class Planner:
     def roll(self, today: date) -> None:
         """Close out the past, then fill the horizon. Never deletes history."""
         closed = 0
+        self._lock_menu_days(today)
         for day, dinner in self.dinners.items():
             if day < today and dinner.status == STATUS_PLANNED:
                 self._set_status(dinner, self.settings.unconfirmed_past, "roll")
@@ -191,6 +192,7 @@ class Planner:
         reset to what it was before today so it isn't counted twice.
         """
         known = {c.id for c in self.cooks}
+        self._lock_menu_days(today)
         old = {
             d: v
             for d, v in self.dinners.items()
@@ -218,6 +220,23 @@ class Planner:
             previous.debt_after, previous.locked = new.debt_after, False
             self.dinners[day] = previous
         return len(old)
+
+    def _lock_menu_days(self, today: date) -> None:
+        """A day with a real menu keeps its cook: a human has decided what is cooked.
+
+        Idempotent, and also covers menus saved before this rule existed.
+        """
+        for day, dinner in self.dinners.items():
+            if (
+                day >= today
+                and dinner.status == STATUS_PLANNED
+                and not dinner.locked
+                and _has_menu(dinner)
+            ):
+                dinner.locked = True
+                dinner.history.append(
+                    ChangeRecord(self._stamp(), "locked", {"reason": "menu"})
+                )
 
     def _debt_base(self, today: date) -> dict[str, int]:
         past = [
@@ -452,6 +471,9 @@ class Planner:
             and going_out is None
         ):
             dinner.menu = None
+            # Unlock only if the menu was the reason for the lock.
+            if not any(h.action in ("swap", "reassign") for h in dinner.history):
+                dinner.locked = False
         else:
             menu = dinner.menu or MenuEntry()
             if dish_id is not None:
@@ -472,6 +494,8 @@ class Planner:
             if rating is not None:
                 menu.rating = rating
             dinner.menu = menu
+            if _has_menu(dinner):
+                dinner.locked = True  # setting a menu fixes the day's cook
         dinner.history.append(
             ChangeRecord(self._stamp(), "menu", {"title": self.menu_title(dinner)})
         )
@@ -667,6 +691,14 @@ class Planner:
         self.notify()
         for name, data in events:
             self._fire(name, data)
+
+
+def _has_menu(dinner: Dinner) -> bool:
+    """A menu that decides something: a title or dish, or not an ordinary home meal."""
+    menu = dinner.menu
+    return bool(
+        menu and (menu.title or menu.dish_id or menu.kind != "home" or menu.going_out)
+    )
 
 
 def _to_plan(dinners: dict[date, Dinner]) -> dict[date, Assignment]:

@@ -58,7 +58,9 @@ Copy this folder to `config/custom_components/dinnersense/` and restart.
   the cycle.
 - At the roll time (and on startup) yesterday's still-planned dinner becomes **done** or **missed**
   (your setting), and the horizon is filled. History is never deleted.
-- A human change **locks** a dinner. Generation never overwrites locked dinners or the past.
+- A human change **locks** a dinner: a swap, a reassign, or **setting a menu** (a title or dish, eating
+  out, leftovers or no dinner). Generation never overwrites locked dinners or the past. Clearing a
+  menu unlocks the day again, unless it was also swapped or reassigned.
 - **Swap**: give day A to cook P. P's next planned day (from today) goes to A's old cook. Both days
   are locked. If P has no upcoming day, the plan is extended (up to 60 days) until there is one.
   Past days can't be swapped; use `reassign` to correct the log.
@@ -116,6 +118,10 @@ data:
 `timers` is an optional list. Each has a `name`, `minutes` (any number above 0) and an optional
 `step`: the **1-based** number of the step it belongs to, which must exist. The timers are stored
 and returned with the recipe (`list_dishes`); nothing starts them yet.
+
+Setting a menu **fixes that day's cook**, so a rebuild (a cook going away, a cook being removed, a
+sensor changing, a restart) never hands a planned dish to someone else. If the cook turns out to be
+unavailable you get a `dinnersense_conflict` event instead.
 
 Menus for days before you installed the integration create log-only records with no cook.
 

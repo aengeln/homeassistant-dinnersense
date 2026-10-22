@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1
+
+- **Setting a menu now locks the day's cook.** Before, a rebuild (availability appearing at boot, a
+  presence sensor, a cook change) could give a planned dish to someone else, which looked like
+  values not surviving a restart. Menus saved by 0.1.0 are locked on the next start. Clearing a
+  menu unlocks the day unless it was also swapped or reassigned.
+- A broken or not-yet-ready availability source can no longer stop the integration from loading.
+
 ## 0.1.0
 
 First release.
