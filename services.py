@@ -26,6 +26,7 @@ from .const import (
     ATTR_START,
     DOMAIN,
 )
+from .importer import async_read_states, titles_by_day
 from .models import MENU_KINDS
 from .planner import Planner, PlannerError
 from .runtime import DinnerSenseConfigEntry
@@ -60,6 +61,16 @@ INGREDIENTS_SCHEMA = vol.Schema(
         **_BASE,
         vol.Optional(ATTR_DATE): cv.date,
         vol.Optional("todo_entity"): cv.entity_id,
+    }
+)
+IMPORT_SCHEMA = vol.Schema(
+    {
+        **_BASE,
+        vol.Required("entity_id"): cv.entity_id,
+        vol.Optional("days", default=10): vol.All(
+            vol.Coerce(int), vol.Range(min=1, max=365)
+        ),
+        vol.Optional("overwrite", default=False): cv.boolean,
     }
 )
 STATS_SCHEMA = vol.Schema(
@@ -248,6 +259,26 @@ def async_setup_services(hass: HomeAssistant) -> None:
         "add_ingredients_to_list",
         add_ingredients_to_list,
         schema=INGREDIENTS_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+
+    async def import_from_entity(call: ServiceCall) -> ServiceResponse:
+        planner = _planner(hass, call)
+        entity_id, days = call.data["entity_id"], call.data["days"]
+        if hass.states.get(entity_id) is None:
+            raise HomeAssistantError(f"{entity_id} was not found")
+        states = await async_read_states(hass, entity_id, days)
+        titles = titles_by_day(states, today(), days)
+        imported, skipped = planner.import_menus(
+            titles, today(), call.data["overwrite"]
+        )
+        return {"imported": imported, "skipped": skipped}
+
+    hass.services.async_register(
+        DOMAIN,
+        "import_from_entity",
+        import_from_entity,
+        schema=IMPORT_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
     )
 

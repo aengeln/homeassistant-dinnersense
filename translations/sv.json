@@ -434,6 +434,28 @@
           "description": ""
         }
       }
+    },
+    "import_from_entity": {
+      "name": "Importera från entitet",
+      "description": "Fyll i tidigare menyer från recorder-historiken för en befintlig textentitet. Sista riktiga värdet varje dag blir dagens meny. Dagar som redan har en meny hoppas över om inte skriv över är på.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
+          "description": ""
+        },
+        "entity_id": {
+          "name": "Entitet",
+          "description": "En input_text- eller text-entitet med middagens titel."
+        },
+        "days": {
+          "name": "Dagar bakåt",
+          "description": "Hur många dagars historik som ska läsas (recorder sparar oftast ca 10)."
+        },
+        "overwrite": {
+          "name": "Skriv över befintliga menyer",
+          "description": ""
+        }
+      }
     }
   }
 }

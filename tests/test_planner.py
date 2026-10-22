@@ -431,3 +431,61 @@ def test_cook_stats_cooked_counts_and_swaps():
         + h.planner.cook_stats("bob", days(4))["cooked_30"]
         == 4
     )
+
+
+# -- import_menus -----------------------------------------------------------------
+
+
+def test_import_menus_sets_past_days_in_one_change():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.roll(days(3))
+    h.planner.create_dish("Tacos")
+    saves, events = h.saves, len(h.events)
+    imported, skipped = h.planner.import_menus(
+        {days(0): "tacos", days(1): "Moose stew", days(-20): "Burger"}, days(3)
+    )
+    assert [i["title"] for i in imported] == ["Burger", "Tacos", "Moose stew"]
+    assert skipped == []
+    assert (
+        h.planner.dinners[days(0)].menu.dish_id == "tacos"
+    )  # linked, case-insensitive
+    assert h.planner.dinners[days(1)].menu.dish_id is None
+    old = h.planner.dinners[days(-20)]
+    assert old.cook == "" and old.menu.title == "Burger"
+    assert (h.saves, len(h.events)) == (saves + 1, events + 1)
+    assert h.events[-1][1]["reason"] == "import"
+    assert old.history[-1].detail["source"] == "import"
+
+
+def test_import_skips_existing_menus_unless_overwrite_and_future_days():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.roll(days(3))
+    h.planner.set_menu(days(1), days(3), title="Keep me")
+    imported, skipped = h.planner.import_menus(
+        {days(1): "Imported", days(2): "New", days(5): "Later"}, days(3)
+    )
+    assert [i["date"] for i in imported] == [days(2).isoformat()]
+    assert {(s["date"], s["reason"]) for s in skipped} == {
+        (days(1).isoformat(), "has_menu"),
+        (days(5).isoformat(), "future"),
+    }
+    assert h.planner.dinners[days(1)].menu.title == "Keep me"
+    h.planner.import_menus({days(1): "Imported"}, days(3), overwrite=True)
+    assert h.planner.dinners[days(1)].menu.title == "Imported"
+
+
+def test_import_with_nothing_to_do_commits_nothing():
+    h = Harness()
+    h.planner.roll(TODAY)
+    saves = h.saves
+    assert h.planner.import_menus({}, TODAY) == ([], [])
+    assert h.saves == saves
+
+
+def test_import_respects_auto_create_dishes():
+    h = Harness(auto_create_dishes=True)
+    h.planner.roll(TODAY)
+    h.planner.import_menus({days(0): "Moose stew"}, TODAY)
+    assert "moose_stew" in h.planner.dishes

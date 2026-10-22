@@ -443,11 +443,7 @@ class Planner:
                     raise PlannerError(f"Unknown dish: {dish_id}")
                 menu.dish_id, menu.title = dish.id, dish.name
             elif title is not None:
-                dish = self.find_dish(title)
-                if dish is None and self.settings.auto_create_dishes:
-                    dish = self._create_dish(title)
-                menu.dish_id = dish.id if dish else None
-                menu.title = dish.name if dish else title
+                self._link_title(menu, title)
             if kind is not None:
                 menu.kind = kind
             if note is not None:
@@ -461,6 +457,63 @@ class Planner:
         self._commit(
             [(EVENT_CHANGED, {"before": [before], "after": [_snapshot(dinner)]})]
         )
+
+    def _link_title(self, menu: MenuEntry, title: str) -> None:
+        """Link a known dish by name/alias, else keep the title as free text."""
+        dish = self.find_dish(title)
+        if dish is None and self.settings.auto_create_dishes:
+            dish = self._create_dish(title)
+        menu.dish_id = dish.id if dish else None
+        menu.title = dish.name if dish else title
+
+    def import_menus(
+        self, titles: dict[date, str], today: date, overwrite: bool = False
+    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+        """Set menu titles for many past days as one change.
+
+        Days that already have a menu are skipped unless ``overwrite``. Days
+        before the integration ran get log-only records. Returns
+        (imported, skipped), each a list of {date, title[, reason]}.
+        """
+        imported: list[dict[str, str]] = []
+        skipped: list[dict[str, str]] = []
+        before: list[dict[str, Any]] = []
+        touched: list[Dinner] = []
+        for day, title in sorted(titles.items()):
+            item = {"date": day.isoformat(), "title": title}
+            if day > today:
+                skipped.append({**item, "reason": "future"})
+                continue
+            existing = self.dinners.get(day)
+            if existing and self.menu_title(existing) and not overwrite:
+                skipped.append({**item, "reason": "has_menu"})
+                continue
+            dinner = self._dinner_for_menu(day, today)
+            before.append(_snapshot(dinner))
+            menu = dinner.menu or MenuEntry()
+            self._link_title(menu, title)
+            dinner.menu = menu
+            dinner.history.append(
+                ChangeRecord(
+                    self._stamp(), "menu", {"title": menu.title, "source": "import"}
+                )
+            )
+            touched.append(dinner)
+            imported.append({**item, "title": menu.title or title})
+        if touched:
+            self._commit(
+                [
+                    (
+                        EVENT_CHANGED,
+                        {
+                            "reason": "import",
+                            "before": before,
+                            "after": [_snapshot(d) for d in touched],
+                        },
+                    )
+                ]
+            )
+        return imported, skipped
 
     def _dinner_for_menu(self, day: date, today: date) -> Dinner:
         if day in self.dinners:

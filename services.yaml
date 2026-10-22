@@ -161,3 +161,21 @@ add_ingredients_to_list:
       selector: { date: }
     todo_entity:
       selector: { entity: { domain: todo } }
+import_from_entity:
+  fields:
+    config_entry_id:
+      selector: { config_entry: { integration: dinnersense } }
+    entity_id:
+      required: true
+      example: input_text.today_s_dinner
+      selector:
+        entity:
+          filter:
+            - domain: input_text
+            - domain: text
+    days:
+      default: 10
+      selector: { number: { min: 1, max: 365, mode: box, unit_of_measurement: days } }
+    overwrite:
+      default: false
+      selector: { boolean: }

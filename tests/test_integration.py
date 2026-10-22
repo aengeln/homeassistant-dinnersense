@@ -698,3 +698,74 @@ async def test_unknown_todo_entity_and_nothing_to_add_are_errors(hass, freezer) 
             DOMAIN, "add_ingredients_to_list", {"date": "2026-03-04"}, blocking=True
         )
     assert items == []
+
+
+# -- Phase 5: import_from_entity (real recorder) ----------------------------------
+
+
+@pytest.mark.real_recorder
+async def test_import_from_entity_reads_real_recorder_history(
+    recorder_mock, hass, enable_custom_integrations, entry, freezer
+) -> None:
+    from pytest_homeassistant_custom_component.components.recorder.common import (
+        async_wait_recording_done,
+    )
+
+    # Old input_text: a value per day, cleared at 02:00 (US/Pacific = 10:00 UTC).
+    entity = "input_text.today_s_dinner"
+    for stamp, value in (
+        ("2026-02-27 20:00:00+00:00", "Soup"),
+        ("2026-02-28 10:00:00+00:00", ""),
+        ("2026-02-28 20:00:00+00:00", "Pasta"),
+        ("2026-02-28 21:00:00+00:00", "Pasta carbonara"),
+        ("2026-03-01 10:00:00+00:00", ""),
+    ):
+        freezer.move_to(stamp)
+        hass.states.async_set(entity, value)
+        await hass.async_block_till_done()
+    await async_wait_recording_done(hass)
+
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    resp = await hass.services.async_call(
+        DOMAIN,
+        "import_from_entity",
+        {"entity_id": entity, "days": 10},
+        blocking=True,
+        return_response=True,
+    )
+    assert resp["imported"] == [
+        {"date": "2026-02-27", "title": "Soup"},
+        {"date": "2026-02-28", "title": "Pasta carbonara"},
+    ]
+    hist = await hass.services.async_call(
+        DOMAIN,
+        "get_history",
+        {"start": "2026-02-20", "end": "2026-03-02"},
+        blocking=True,
+        return_response=True,
+    )
+    assert [(d["date"], d["menu_title"]) for d in hist["dinners"] if d["menu"]] == [
+        ("2026-02-27", "Soup"),
+        ("2026-02-28", "Pasta carbonara"),
+    ]
+    again = await hass.services.async_call(
+        DOMAIN,
+        "import_from_entity",
+        {"entity_id": entity, "days": 10},
+        blocking=True,
+        return_response=True,
+    )
+    assert again["imported"] == [] and len(again["skipped"]) == 2
+
+
+async def test_import_from_unknown_entity_is_an_error(hass, entry, freezer) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    with pytest.raises(HomeAssistantError, match="not found"):
+        await hass.services.async_call(
+            DOMAIN,
+            "import_from_entity",
+            {"entity_id": "input_text.nope"},
+            blocking=True,
+        )

@@ -434,6 +434,28 @@
           "description": ""
         }
       }
+    },
+    "import_from_entity": {
+      "name": "Import from entity",
+      "description": "Seed past menus from the recorder history of an existing text entity. The last real value set each day becomes that day's menu. Days that already have a menu are skipped unless overwrite is on.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
+          "description": ""
+        },
+        "entity_id": {
+          "name": "Entity",
+          "description": "An input_text or text entity holding the dinner title."
+        },
+        "days": {
+          "name": "Days back",
+          "description": "How many days of history to read (recorder usually keeps about 10)."
+        },
+        "overwrite": {
+          "name": "Overwrite existing menus",
+          "description": ""
+        }
+      }
     }
   }
 }
