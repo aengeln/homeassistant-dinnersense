@@ -54,6 +54,12 @@ PLAN_SCHEMA = vol.Schema(
     {**_BASE, vol.Optional(ATTR_START): cv.date, vol.Optional(ATTR_END): cv.date}
 )
 ENTRY_SCHEMA = vol.Schema(_BASE)
+STATS_SCHEMA = vol.Schema(
+    {
+        **_BASE,
+        vol.Optional("period"): vol.All(vol.Coerce(int), vol.Range(min=1, max=3650)),
+    }
+)
 HISTORY_SCHEMA = vol.Schema(
     {**_BASE, vol.Required(ATTR_START): cv.date, vol.Required(ATTR_END): cv.date}
 )
@@ -99,7 +105,7 @@ UPDATE_DISH_SCHEMA = vol.Schema(
 DELETE_DISH_SCHEMA = vol.Schema({**_BASE, vol.Required("dish_id"): cv.string})
 
 
-def _planner(hass: HomeAssistant, call: ServiceCall) -> Planner:
+def _entry(hass: HomeAssistant, call: ServiceCall) -> DinnerSenseConfigEntry:
     entries: list[DinnerSenseConfigEntry] = [
         e
         for e in hass.config_entries.async_entries(DOMAIN)
@@ -111,7 +117,11 @@ def _planner(hass: HomeAssistant, call: ServiceCall) -> Planner:
         raise HomeAssistantError("No loaded Dinner Sense household found")
     if len(entries) > 1:
         raise HomeAssistantError("Several households: pass config_entry_id")
-    return entries[0].runtime_data.planner
+    return entries[0]
+
+
+def _planner(hass: HomeAssistant, call: ServiceCall) -> Planner:
+    return _entry(hass, call).runtime_data.planner
 
 
 def _cook_id(planner: Planner, value: str) -> str:
@@ -213,6 +223,30 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
     def regenerate(p: Planner, c: ServiceCall) -> None:
         p.regenerate(today())
+
+    async def get_stats(call: ServiceCall) -> ServiceResponse:
+        tips = _entry(hass, call).runtime_data.tips
+        return tips.stats(call.data.get("period"))
+
+    async def generate_tips(call: ServiceCall) -> ServiceResponse:
+        tips = _entry(hass, call).runtime_data.tips
+        generated = await tips.async_refresh()
+        return {"tips": [t["text"] for t in generated], "source": tips.source}
+
+    hass.services.async_register(
+        DOMAIN,
+        "get_stats",
+        get_stats,
+        schema=STATS_SCHEMA,
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "generate_tips",
+        generate_tips,
+        schema=ENTRY_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
 
     none, only = SupportsResponse.NONE, SupportsResponse.ONLY
     optional = SupportsResponse.OPTIONAL

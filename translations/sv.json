@@ -31,7 +31,8 @@
           "roll_time": "Tid för nattlig rullning",
           "dinner_days": "Dagar med planerad middag",
           "menu_follows_cook": "Menyn följer kocken vid byte",
-          "unconfirmed_past": "Obekräftade tidigare middagar räknas som"
+          "unconfirmed_past": "Obekräftade tidigare middagar räknas som",
+          "ai_task_entity": "AI-uppgift för tips (valfritt)"
         }
       },
       "cooks": {
@@ -96,6 +97,9 @@
       },
       "dinner_score": {
         "name": "Middagspoäng {cook}"
+      },
+      "dinner_tips": {
+        "name": "Middagstips"
       }
     },
     "select": {
@@ -379,6 +383,30 @@
         },
         "end": {
           "name": "Slut",
+          "description": ""
+        }
+      }
+    },
+    "get_stats": {
+      "name": "Hämta statistik",
+      "description": "Returnera måltidsstatistik: dagar sedan varje rätt och tagg, frekvenser, serier och dagar utan meny.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
+          "description": ""
+        },
+        "period": {
+          "name": "Period (dagar)",
+          "description": "Räkna bara de senaste N dagarna."
+        }
+      }
+    },
+    "generate_tips": {
+      "name": "Skapa tips",
+      "description": "Uppdatera middagstipsen nu.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
           "description": ""
         }
       }

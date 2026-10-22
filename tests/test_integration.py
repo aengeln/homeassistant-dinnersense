@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
@@ -14,7 +15,8 @@ from pytest_homeassistant_custom_component.common import (
 from custom_components.dinnersense.availability import AvailabilityTracker
 from custom_components.dinnersense.const import DOMAIN
 from custom_components.dinnersense.models import Settings, build_cooks
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, SupportsResponse
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
@@ -368,3 +370,130 @@ async def test_options_flow_saves_cook_availability(hass, entry, freezer) -> Non
     assert bob["availability"] == [
         {"type": "until", "entity_id": "input_datetime.bob_away"}
     ]
+
+
+# -- Phase 4: stats and tips ------------------------------------------------------
+
+
+async def _burger_history(hass) -> None:
+    for day in ("2026-02-01", "2026-02-08", "2026-02-15"):
+        await hass.services.async_call(
+            DOMAIN, "set_menu", {"date": day, "title": "Burgers"}, blocking=True
+        )
+
+
+def _fake_ai(hass, answer=None, error=None):
+    calls = []
+
+    async def handler(call):
+        calls.append(call.data)
+        if error:
+            raise error
+        return {"conversation_id": "x", "data": answer}
+
+    hass.services.async_register(
+        "ai_task", "generate_data", handler, supports_response=SupportsResponse.ONLY
+    )
+    return calls
+
+
+async def _entry_with_ai(hass):
+    cooks = build_cooks(["Ann", "Bob", "Cy"])
+    settings = Settings(ai_task_entity="ai_task.fake").to_dict()
+    e = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Household",
+        data={"name": "Test Household"},
+        options={"cooks": [c.to_dict() for c in cooks], "settings": settings},
+    )
+    e.add_to_hass(hass)
+    return e
+
+
+async def test_rule_tips_without_ai_task(hass, entry, freezer) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    await _burger_history(hass)
+    resp = await hass.services.async_call(
+        DOMAIN, "generate_tips", {}, blocking=True, return_response=True
+    )
+    assert resp["source"] == "rules"
+    assert "No Burgers for 15 days" in resp["tips"]
+    state = hass.states.get("sensor.test_household_dinner_tips")
+    assert state.attributes["source"] == "rules"
+    assert state.attributes["tips"] == resp["tips"]
+    assert state.state == resp["tips"][0]
+
+
+async def test_llm_tips_used_when_numbers_check_out(hass, freezer) -> None:
+    freezer.move_to(NOW)
+    calls = _fake_ai(hass, {"tips": ["Burgers haven't been on the table for 15 days"]})
+    entry = await _entry_with_ai(hass)
+    await _setup(hass, entry)
+    await _burger_history(hass)
+    resp = await hass.services.async_call(
+        DOMAIN, "generate_tips", {}, blocking=True, return_response=True
+    )
+    assert resp["source"] == "llm"
+    assert resp["tips"] == ["Burgers haven't been on the table for 15 days"]
+    assert calls[-1]["entity_id"] == "ai_task.fake"
+    assert '"days_since_last": 15' in calls[-1]["instructions"]
+    assert (
+        hass.states.get("sensor.test_household_dinner_tips").attributes["source"]
+        == "llm"
+    )
+
+
+async def test_llm_tip_with_invented_number_falls_back_to_rules(hass, freezer) -> None:
+    freezer.move_to(NOW)
+    _fake_ai(hass, {"tips": ["Burgers: 99 days without! Wow."]})
+    entry = await _entry_with_ai(hass)
+    await _setup(hass, entry)
+    await _burger_history(hass)
+    resp = await hass.services.async_call(
+        DOMAIN, "generate_tips", {}, blocking=True, return_response=True
+    )
+    assert resp["source"] == "rules"
+    assert "No Burgers for 15 days" in resp["tips"]
+
+
+async def test_ai_task_failure_falls_back_to_rules(hass, freezer) -> None:
+    freezer.move_to(NOW)
+    _fake_ai(hass, error=HomeAssistantError("model offline"))
+    entry = await _entry_with_ai(hass)
+    await _setup(hass, entry)
+    await _burger_history(hass)
+    resp = await hass.services.async_call(
+        DOMAIN, "generate_tips", {}, blocking=True, return_response=True
+    )
+    assert resp["source"] == "rules" and resp["tips"]
+
+
+async def test_menu_change_triggers_debounced_refresh(hass, entry, freezer) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    before = hass.states.get("sensor.test_household_dinner_tips").attributes[
+        "generated_at"
+    ]
+    await _burger_history(hass)  # three quick edits
+    freezer.tick(timedelta(seconds=31))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    after = hass.states.get("sensor.test_household_dinner_tips").attributes
+    assert after["generated_at"] != before
+    assert "No Burgers for 15 days" in after["tips"]
+
+
+async def test_get_stats_service(hass, entry, freezer) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    await _burger_history(hass)
+    stats = await hass.services.async_call(
+        DOMAIN, "get_stats", {}, blocking=True, return_response=True
+    )
+    burgers = next(r for r in stats["dishes"] if r["name"] == "Burgers")
+    assert (burgers["days_since"], burgers["count_90"]) == (15, 3)
+    short = await hass.services.async_call(
+        DOMAIN, "get_stats", {"period": 7}, blocking=True, return_response=True
+    )
+    assert not any(r["name"] == "Burgers" for r in short["dishes"])

@@ -31,7 +31,8 @@
           "roll_time": "Nightly roll time",
           "dinner_days": "Days with a planned dinner",
           "menu_follows_cook": "Menu follows the cook when swapping",
-          "unconfirmed_past": "Unconfirmed past dinners count as"
+          "unconfirmed_past": "Unconfirmed past dinners count as",
+          "ai_task_entity": "AI Task for tips (optional)"
         }
       },
       "cooks": {
@@ -96,6 +97,9 @@
       },
       "dinner_score": {
         "name": "Dinner score {cook}"
+      },
+      "dinner_tips": {
+        "name": "Dinner tips"
       }
     },
     "select": {
@@ -379,6 +383,30 @@
         },
         "end": {
           "name": "End",
+          "description": ""
+        }
+      }
+    },
+    "get_stats": {
+      "name": "Get stats",
+      "description": "Return meal statistics: days since each dish and tag, frequencies, streaks and unplanned days.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
+          "description": ""
+        },
+        "period": {
+          "name": "Period (days)",
+          "description": "Only consider the last N days of history."
+        }
+      }
+    },
+    "generate_tips": {
+      "name": "Generate tips",
+      "description": "Refresh the dinner tips now.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
           "description": ""
         }
       }

@@ -17,6 +17,7 @@ from .planner import Planner
 from .runtime import DinnerSenseConfigEntry, DinnerSenseData
 from .services import async_setup_services
 from .store import HouseholdStore
+from .tips import TipsManager
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -57,7 +58,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: DinnerSenseConfigEntry) 
         now=now,
     )
     holder.append(planner)
-    entry.runtime_data = DinnerSenseData(planner, store)
+    tips = TipsManager(hass, entry.entry_id, planner)
+    entry.runtime_data = DinnerSenseData(planner, store, tips)
 
     tracker = AvailabilityTracker(hass, planner)
     if cooks:
@@ -87,6 +89,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: DinnerSenseConfigEntry) 
         async_track_time_change(hass, _midnight, hour=0, minute=0, second=1),
     ]
     unsubs += tracker.async_start()
+    unsubs += tips.async_start()
+    entry.async_create_background_task(hass, tips.async_refresh(), "dinnersense tips")
     for unsub in unsubs:
         entry.async_on_unload(unsub)
     entry.async_on_unload(entry.add_update_listener(_async_reload))

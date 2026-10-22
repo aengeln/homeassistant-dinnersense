@@ -21,6 +21,7 @@ async def async_setup_entry(
             DinnerDaySensor(entry, "today", 0),
             DinnerDaySensor(entry, "tomorrow", 1),
             *(DinnerScoreSensor(entry, c.id, c.name) for c in planner.cooks),
+            DinnerTipsSensor(entry),
         ]
     )
 
@@ -74,4 +75,30 @@ class DinnerScoreSensor(DinnerSenseEntity, SensorEntity):
             "swaps_given": stats["swaps_given"],
             "swaps_taken": stats["swaps_taken"],
             "debt": stats["debt"],
+        }
+
+
+class DinnerTipsSensor(DinnerSenseEntity, SensorEntity):
+    """The first tip as state; all tips and their source as attributes."""
+
+    _attr_translation_key = "dinner_tips"
+
+    def __init__(self, entry: DinnerSenseConfigEntry) -> None:
+        super().__init__(entry, "tips")
+        self._tips = entry.runtime_data.tips
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(self._tips.add_listener(self.async_write_ha_state))
+
+    @property
+    def native_value(self) -> str | None:
+        return self._tips.tips[0]["text"][:255] if self._tips.tips else None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        return {
+            "tips": [t["text"] for t in self._tips.tips],
+            "generated_at": self._tips.generated_at,
+            "source": self._tips.source,
         }
