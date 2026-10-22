@@ -32,7 +32,8 @@
           "dinner_days": "Dagar med planerad middag",
           "menu_follows_cook": "Menyn följer kocken vid byte",
           "unconfirmed_past": "Obekräftade tidigare middagar räknas som",
-          "ai_task_entity": "AI-uppgift för tips (valfritt)"
+          "ai_task_entity": "AI-uppgift för tips (valfritt)",
+          "todo_entity": "Inköpslista (valfritt)"
         }
       },
       "cooks": {
@@ -115,6 +116,11 @@
     "calendar": {
       "dinner_calendar": {
         "name": "Middag"
+      }
+    },
+    "button": {
+      "add_ingredients_today": {
+        "name": "Lägg till ingredienser idag"
       }
     }
   },
@@ -407,6 +413,24 @@
       "fields": {
         "config_entry_id": {
           "name": "Hushåll",
+          "description": ""
+        }
+      }
+    },
+    "add_ingredients_to_list": {
+      "name": "Lägg ingredienser på listan",
+      "description": "Lägg dagens rätts ingredienser (som \"Namn x mängd\") på en att-göra-lista och hoppa över sådant som redan ligger öppet på den.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
+          "description": ""
+        },
+        "date": {
+          "name": "Datum (standard: idag)",
+          "description": ""
+        },
+        "todo_entity": {
+          "name": "Att-göra-lista (standard: hushållets lista)",
           "description": ""
         }
       }

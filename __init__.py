@@ -21,7 +21,13 @@ from .tips import TipsManager
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS = [Platform.CALENDAR, Platform.SELECT, Platform.SENSOR, Platform.TEXT]
+PLATFORMS = [
+    Platform.BUTTON,
+    Platform.CALENDAR,
+    Platform.SELECT,
+    Platform.SENSOR,
+    Platform.TEXT,
+]
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:

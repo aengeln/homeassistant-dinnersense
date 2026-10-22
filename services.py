@@ -29,6 +29,7 @@ from .const import (
 from .models import MENU_KINDS
 from .planner import Planner, PlannerError
 from .runtime import DinnerSenseConfigEntry
+from .shopping import async_add_ingredients
 
 _BASE = {vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string}
 _DAY = {**_BASE, vol.Required(ATTR_DATE): cv.date}
@@ -54,6 +55,13 @@ PLAN_SCHEMA = vol.Schema(
     {**_BASE, vol.Optional(ATTR_START): cv.date, vol.Optional(ATTR_END): cv.date}
 )
 ENTRY_SCHEMA = vol.Schema(_BASE)
+INGREDIENTS_SCHEMA = vol.Schema(
+    {
+        **_BASE,
+        vol.Optional(ATTR_DATE): cv.date,
+        vol.Optional("todo_entity"): cv.entity_id,
+    }
+)
 STATS_SCHEMA = vol.Schema(
     {
         **_BASE,
@@ -223,6 +231,25 @@ def async_setup_services(hass: HomeAssistant) -> None:
 
     def regenerate(p: Planner, c: ServiceCall) -> None:
         p.regenerate(today())
+
+    async def add_ingredients_to_list(call: ServiceCall) -> ServiceResponse:
+        planner = _planner(hass, call)
+        day = call.data.get(ATTR_DATE, today())
+        return await async_add_ingredients(
+            hass,
+            planner.dinner_on(day),
+            planner.dishes,
+            call.data.get("todo_entity") or planner.settings.todo_entity,
+            day,
+        )
+
+    hass.services.async_register(
+        DOMAIN,
+        "add_ingredients_to_list",
+        add_ingredients_to_list,
+        schema=INGREDIENTS_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
 
     async def get_stats(call: ServiceCall) -> ServiceResponse:
         tips = _entry(hass, call).runtime_data.tips

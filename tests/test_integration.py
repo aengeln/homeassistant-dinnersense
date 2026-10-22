@@ -17,7 +17,7 @@ from custom_components.dinnersense.availability import AvailabilityTracker
 from custom_components.dinnersense.const import DOMAIN
 from custom_components.dinnersense.models import Settings, build_cooks
 from homeassistant.core import HomeAssistant, SupportsResponse
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
@@ -560,3 +560,141 @@ async def test_household_works_with_no_ai_task_at_all(hass, entry, freezer) -> N
     assert entry.options["settings"]["ai_task_entity"] is None
     assert hass.states.get("sensor.test_household_dinner_tips") is not None
     assert hass.states.get("sensor.test_household_dinner_today").state == "Ann"
+
+
+# -- Phase 5: shopping list -------------------------------------------------------
+
+
+def _fake_todo(hass, items=None, entity="todo.shopping_list"):
+    """Register in-memory todo.get_items/add_item; return the item list."""
+    store = [{"summary": s, "status": "needs_action"} for s in (items or [])]
+
+    async def get_items(call):
+        wanted = call.data.get("status") or ["needs_action", "completed"]
+        return {entity: {"items": [i for i in store if i["status"] in wanted]}}
+
+    async def add_item(call):
+        store.append({"summary": call.data["item"], "status": "needs_action"})
+
+    hass.services.async_register(
+        "todo", "get_items", get_items, supports_response=SupportsResponse.ONLY
+    )
+    hass.services.async_register("todo", "add_item", add_item)
+    hass.states.async_set(entity, "0")
+    return store
+
+
+async def _household_with_tacos(hass, freezer, todo_entity="todo.shopping_list"):
+    freezer.move_to(NOW)
+    cooks = build_cooks(["Ann", "Bob", "Cy"])
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Household",
+        data={"name": "Test Household"},
+        options={
+            "cooks": [c.to_dict() for c in cooks],
+            "settings": Settings(todo_entity=todo_entity).to_dict(),
+        },
+    )
+    entry.add_to_hass(hass)
+    await _setup(hass, entry)
+    await hass.services.async_call(
+        DOMAIN,
+        "create_dish",
+        {
+            "name": "Tacos",
+            "recipe": {
+                "ingredients": [
+                    {"name": "Tortillas", "quantity": "8"},
+                    {"name": "Minced beef", "quantity": "500 g"},
+                    {"name": "Lime"},
+                ]
+            },
+        },
+        blocking=True,
+        return_response=True,
+    )
+    await hass.services.async_call(
+        DOMAIN, "set_menu", {"date": "2026-03-02", "title": "Tacos"}, blocking=True
+    )
+    return entry
+
+
+async def test_button_adds_todays_ingredients_as_name_x_quantity(hass, freezer) -> None:
+    items = _fake_todo(hass)
+    await _household_with_tacos(hass, freezer)
+    await hass.services.async_call(
+        "button",
+        "press",
+        {"entity_id": "button.test_household_add_ingredients_today"},
+        blocking=True,
+    )
+    assert [i["summary"] for i in items] == [
+        "Tortillas x 8",
+        "Minced beef x 500 g",
+        "Lime",
+    ]
+
+
+async def test_second_press_skips_duplicates_but_completed_items_dont_count(
+    hass, freezer
+) -> None:
+    items = _fake_todo(hass, ["milk", "TORTILLAS x 12"])
+    items.append({"summary": "Lime", "status": "completed"})  # already bought
+    await _household_with_tacos(hass, freezer)
+    resp = await hass.services.async_call(
+        DOMAIN, "add_ingredients_to_list", {}, blocking=True, return_response=True
+    )
+    assert resp == {"added": ["Minced beef x 500 g", "Lime"], "skipped": ["Tortillas"]}
+    again = await hass.services.async_call(
+        DOMAIN, "add_ingredients_to_list", {}, blocking=True, return_response=True
+    )
+    assert again == {
+        "added": [],
+        "skipped": ["Tortillas", "Minced beef", "Lime"],
+    }
+    assert [i["summary"] for i in items if i["status"] == "needs_action"].count(
+        "Lime"
+    ) == 1
+
+
+async def test_service_can_target_another_date_and_todo_entity(hass, freezer) -> None:
+    other = _fake_todo(hass, entity="todo.other")
+    await _household_with_tacos(hass, freezer, todo_entity=None)
+    await hass.services.async_call(
+        DOMAIN, "set_menu", {"date": "2026-03-03", "title": "tacos"}, blocking=True
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "add_ingredients_to_list",
+        {"date": "2026-03-03", "todo_entity": "todo.other"},
+        blocking=True,
+    )
+    assert len(other) == 3
+
+
+async def test_missing_todo_entity_gives_a_clear_error(hass, freezer) -> None:
+    await _household_with_tacos(hass, freezer, todo_entity=None)
+    with pytest.raises(ServiceValidationError, match="No todo list set"):
+        await hass.services.async_call(
+            DOMAIN, "add_ingredients_to_list", {}, blocking=True
+        )
+    button = "button.test_household_add_ingredients_today"
+    assert hass.states.get(button).state == "unavailable"
+
+
+async def test_unknown_todo_entity_and_nothing_to_add_are_errors(hass, freezer) -> None:
+    items = _fake_todo(hass)
+    await _household_with_tacos(hass, freezer)
+    with pytest.raises(ServiceValidationError, match="not found"):
+        await hass.services.async_call(
+            DOMAIN,
+            "add_ingredients_to_list",
+            {"todo_entity": "todo.nope"},
+            blocking=True,
+        )
+    with pytest.raises(ServiceValidationError, match="No dish with ingredients"):
+        await hass.services.async_call(
+            DOMAIN, "add_ingredients_to_list", {"date": "2026-03-04"}, blocking=True
+        )
+    assert items == []

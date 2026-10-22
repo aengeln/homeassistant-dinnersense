@@ -32,7 +32,8 @@
           "dinner_days": "Days with a planned dinner",
           "menu_follows_cook": "Menu follows the cook when swapping",
           "unconfirmed_past": "Unconfirmed past dinners count as",
-          "ai_task_entity": "AI Task for tips (optional)"
+          "ai_task_entity": "AI Task for tips (optional)",
+          "todo_entity": "Shopping list (optional)"
         }
       },
       "cooks": {
@@ -115,6 +116,11 @@
     "calendar": {
       "dinner_calendar": {
         "name": "Dinner"
+      }
+    },
+    "button": {
+      "add_ingredients_today": {
+        "name": "Add ingredients today"
       }
     }
   },
@@ -407,6 +413,24 @@
       "fields": {
         "config_entry_id": {
           "name": "Household",
+          "description": ""
+        }
+      }
+    },
+    "add_ingredients_to_list": {
+      "name": "Add ingredients to list",
+      "description": "Add a day's dish ingredients (as \"Name x quantity\") to a todo list, skipping items already open on it.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
+          "description": ""
+        },
+        "date": {
+          "name": "Date (default: today)",
+          "description": ""
+        },
+        "todo_entity": {
+          "name": "Todo list (default: the household's list)",
           "description": ""
         }
       }

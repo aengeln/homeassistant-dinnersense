@@ -153,3 +153,11 @@ generate_tips:
   fields:
     config_entry_id:
       selector: { config_entry: { integration: dinnersense } }
+add_ingredients_to_list:
+  fields:
+    config_entry_id:
+      selector: { config_entry: { integration: dinnersense } }
+    date:
+      selector: { date: }
+    todo_entity:
+      selector: { entity: { domain: todo } }
