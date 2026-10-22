@@ -17,6 +17,13 @@
   "options": {
     "step": {
       "init": {
+        "title": "Dinner Sense",
+        "menu_options": {
+          "settings": "Plan settings",
+          "cooks": "Cooks and availability"
+        }
+      },
+      "settings": {
         "title": "Dinner Sense settings",
         "data": {
           "cook_names": "Cooks (rotation order, comma separated)",
@@ -26,7 +33,30 @@
           "menu_follows_cook": "Menu follows the cook when swapping",
           "unconfirmed_past": "Unconfirmed past dinners count as"
         }
+      },
+      "cooks": {
+        "title": "Choose a cook",
+        "data": {
+          "cook": "Cook"
+        }
+      },
+      "cook": {
+        "title": "Edit {cook}",
+        "description": "Optional. Any source that says the cook is away keeps them out of the rotation.",
+        "data": {
+          "person_entity": "Person entity",
+          "color": "Colour (hex, for dashboards)",
+          "away_calendar": "Away calendar",
+          "away_keyword": "Calendar keyword (default: away)",
+          "away_until": "Away until (date helper)",
+          "away_from": "Away from (date helper)",
+          "away_to": "Away to (date helper)",
+          "away_sensor": "Away now (binary sensor, today only)"
+        }
       }
+    },
+    "abort": {
+      "no_cooks": "Add cooks in Plan settings first."
     }
   },
   "selector": {
@@ -63,6 +93,9 @@
       },
       "dinner_tomorrow": {
         "name": "Dinner tomorrow"
+      },
+      "dinner_score": {
+        "name": "Dinner score {cook}"
       }
     },
     "select": {
@@ -302,6 +335,50 @@
       "fields": {
         "config_entry_id": {
           "name": "Household",
+          "description": ""
+        }
+      }
+    },
+    "set_unavailable": {
+      "name": "Set unavailable",
+      "description": "Mark a cook as unavailable for a date range. Unlocked future dinners are rebuilt.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
+          "description": ""
+        },
+        "cook": {
+          "name": "Cook",
+          "description": ""
+        },
+        "start": {
+          "name": "Start",
+          "description": ""
+        },
+        "end": {
+          "name": "End",
+          "description": ""
+        }
+      }
+    },
+    "clear_unavailable": {
+      "name": "Clear unavailable",
+      "description": "Remove a cook's manual unavailable ranges that overlap the given dates (all if none given).",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
+          "description": ""
+        },
+        "cook": {
+          "name": "Cook",
+          "description": ""
+        },
+        "start": {
+          "name": "Start",
+          "description": ""
+        },
+        "end": {
+          "name": "End",
           "description": ""
         }
       }

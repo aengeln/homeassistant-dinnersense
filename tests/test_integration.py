@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
@@ -9,6 +11,7 @@ from pytest_homeassistant_custom_component.common import (
     async_fire_time_changed,
 )
 
+from custom_components.dinnersense.availability import AvailabilityTracker
 from custom_components.dinnersense.const import DOMAIN
 from custom_components.dinnersense.models import Settings, build_cooks
 from homeassistant.core import HomeAssistant
@@ -98,7 +101,9 @@ async def test_nightly_roll_shifts_slots(hass, entry, freezer) -> None:
     freezer.move_to(NOW)
     await _setup(hass, entry)
     rolled = async_capture_events(hass, "dinnersense_rolled")
-    freezer.move_to("2026-03-03 10:00:01+00:00")  # 02:00 in the test time zone (US/Pacific)
+    freezer.move_to(
+        "2026-03-03 10:00:01+00:00"
+    )  # 02:00 in the test time zone (US/Pacific)
     async_fire_time_changed(hass, dt_util.utcnow())
     await hass.async_block_till_done()
     assert rolled
@@ -110,9 +115,7 @@ async def test_unique_ids_are_stable(hass, entry, freezer) -> None:
     freezer.move_to(NOW)
     await _setup(hass, entry)
     reg = er.async_get(hass)
-    assert reg.async_get_entity_id(
-        "select", DOMAIN, f"{entry.entry_id}_day_3"
-    )
+    assert reg.async_get_entity_id("select", DOMAIN, f"{entry.entry_id}_day_3")
 
 
 # -- Phase 2: menus, dishes, calendar -----------------------------------------
@@ -143,17 +146,25 @@ async def test_future_menu_shows_in_text_select_attrs_and_calendar(
         blocking=True,
         return_response=True,
     )
-    summaries = [e["summary"] for e in events["calendar.test_household_dinner"]["events"]]
+    summaries = [
+        e["summary"] for e in events["calendar.test_household_dinner"]["events"]
+    ]
     assert summaries == ["Ann — Lasagne"]
 
 
-async def test_typing_tacos_links_the_dish_via_text_entity(hass, entry, freezer) -> None:
+async def test_typing_tacos_links_the_dish_via_text_entity(
+    hass, entry, freezer
+) -> None:
     freezer.move_to(NOW)
     await _setup(hass, entry)
     await hass.services.async_call(
         DOMAIN,
         "create_dish",
-        {"name": "Tacos", "tags": ["mexican"], "recipe": {"ingredients": [{"name": "Tortillas"}]}},
+        {
+            "name": "Tacos",
+            "tags": ["mexican"],
+            "recipe": {"ingredients": [{"name": "Tortillas"}]},
+        },
         blocking=True,
         return_response=True,
     )
@@ -172,11 +183,15 @@ async def test_typing_tacos_links_the_dish_via_text_entity(hass, entry, freezer)
     assert [d["name"] for d in dishes["dishes"]] == ["Tacos"]
 
 
-async def test_edit_past_menu_and_it_persists_across_reload(hass, entry, freezer) -> None:
+async def test_edit_past_menu_and_it_persists_across_reload(
+    hass, entry, freezer
+) -> None:
     freezer.move_to(NOW)
     await _setup(hass, entry)
     await hass.services.async_call(
-        DOMAIN, "set_menu", {"date": "2026-02-23", "title": "Burgers", "rating": 5},
+        DOMAIN,
+        "set_menu",
+        {"date": "2026-02-23", "title": "Burgers", "rating": 5},
         blocking=True,
     )
     assert await hass.config_entries.async_reload(entry.entry_id)
@@ -190,4 +205,166 @@ async def test_edit_past_menu_and_it_persists_across_reload(hass, entry, freezer
     )
     assert [(d["date"], d["menu_title"]) for d in hist["dinners"] if d["menu"]] == [
         ("2026-02-23", "Burgers")
+    ]
+
+
+# -- Phase 3: availability, conflicts, scores ---------------------------------
+
+
+def _entry_with(hass, availability_by_cook=None):
+    cooks = build_cooks(["Ann", "Bob", "Cy"])
+    for c in cooks:
+        c.availability = (availability_by_cook or {}).get(c.id, [])
+    e = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test Household",
+        data={"name": "Test Household"},
+        options={
+            "cooks": [c.to_dict() for c in cooks],
+            "settings": Settings().to_dict(),
+        },
+    )
+    e.add_to_hass(hass)
+    return e
+
+
+def _slot_cooks(hass, n=10):
+    return [
+        hass.states.get(f"select.test_household_dinner_day_{i}").state for i in range(n)
+    ]
+
+
+async def test_input_datetime_until_keeps_cook_out_and_follows_changes(
+    hass, freezer
+) -> None:
+    freezer.move_to(NOW)
+    hass.states.async_set("input_datetime.bob_away", "2026-03-04")
+    entry = _entry_with(
+        hass, {"bob": [{"type": "until", "entity_id": "input_datetime.bob_away"}]}
+    )
+    await _setup(hass, entry)
+    assert "Bob" not in _slot_cooks(hass)[:3]  # Mar 2-4
+    hass.states.async_set("input_datetime.bob_away", "2026-03-01")  # already past
+    await hass.async_block_till_done()
+    assert _slot_cooks(hass)[1] == "Bob"
+
+
+async def test_binary_sensor_moves_todays_cook_only_while_on(hass, freezer) -> None:
+    freezer.move_to(NOW)
+    hass.states.async_set("binary_sensor.ann_away", "on")
+    entry = _entry_with(
+        hass,
+        {"ann": [{"type": "binary_sensor", "entity_id": "binary_sensor.ann_away"}]},
+    )
+    await _setup(hass, entry)
+    assert hass.states.get("sensor.test_household_dinner_today").state != "Ann"
+    hass.states.async_set("binary_sensor.ann_away", "off")
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.test_household_dinner_today").state == "Ann"
+
+
+async def test_calendar_source_blocks_event_days(hass, freezer) -> None:
+    freezer.move_to(NOW)
+    events = [{"start": "2026-03-03", "end": "2026-03-05", "summary": "Bob away"}]
+    entry = _entry_with(
+        hass,
+        {
+            "bob": [
+                {"type": "calendar", "entity_id": "calendar.family", "keyword": "away"}
+            ]
+        },
+    )
+    with patch.object(AvailabilityTracker, "_calendar_events", return_value=events):
+        await _setup(hass, entry)
+    slots = _slot_cooks(hass)
+    assert slots[1] != "Bob"  # Mar 3 is Bob's natural day, now blocked
+    assert "Bob" not in slots[1:3]  # Mar 3 and 4
+
+
+async def test_set_and_clear_unavailable_services(hass, entry, freezer) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    before = _slot_cooks(hass)
+    await hass.services.async_call(
+        DOMAIN,
+        "set_unavailable",
+        {"cook": "Bob", "start": "2026-03-02", "end": "2026-03-05"},
+        blocking=True,
+    )
+    assert "Bob" not in _slot_cooks(hass)[:4]
+    await hass.services.async_call(
+        DOMAIN, "clear_unavailable", {"cook": "bob"}, blocking=True
+    )
+    assert _slot_cooks(hass) == before
+
+
+async def test_manual_unavailability_survives_reload(hass, entry, freezer) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    await hass.services.async_call(
+        DOMAIN,
+        "set_unavailable",
+        {"cook": "bob", "start": "2026-03-02", "end": "2026-03-05"},
+        blocking=True,
+    )
+    expected = _slot_cooks(hass)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert _slot_cooks(hass) == expected
+
+
+async def test_conflict_event_for_locked_dinner(hass, entry, freezer) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    await hass.services.async_call(
+        DOMAIN, "reassign", {"date": "2026-03-06", "cook": "cy"}, blocking=True
+    )
+    conflicts = async_capture_events(hass, "dinnersense_conflict")
+    await hass.services.async_call(
+        DOMAIN,
+        "set_unavailable",
+        {"cook": "cy", "start": "2026-03-06", "end": "2026-03-06"},
+        blocking=True,
+    )
+    assert [c.data["date"] for c in conflicts] == ["2026-03-06"]
+    assert hass.states.get("select.test_household_dinner_day_4").state == "Cy"
+
+
+async def test_score_sensors_count_swaps(hass, entry, freezer) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    await hass.services.async_call(
+        "select",
+        "select_option",
+        {"entity_id": "select.test_household_dinner_day_3", "option": "Cy"},
+        blocking=True,
+    )
+    ann = hass.states.get("sensor.test_household_dinner_score_ann")
+    cy = hass.states.get("sensor.test_household_dinner_score_cy")
+    assert ann.attributes["swaps_given"] == 1 and ann.attributes["swaps_taken"] == 0
+    assert cy.attributes["swaps_taken"] == 1
+    assert ann.state == "0" and ann.attributes["debt"] == 0
+
+
+async def test_options_flow_saves_cook_availability(hass, entry, freezer) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["type"] == "menu"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "cooks"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"cook": "bob"}
+    )
+    assert result["step_id"] == "cook"
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {"color": "#3b82f6", "away_until": "input_datetime.bob_away"},
+    )
+    assert result["type"] == "create_entry"
+    bob = next(c for c in entry.options["cooks"] if c["id"] == "bob")
+    assert bob["color"] == "#3b82f6"
+    assert bob["availability"] == [
+        {"type": "until", "entity_id": "input_datetime.bob_away"}
     ]

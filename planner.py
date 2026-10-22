@@ -7,7 +7,7 @@ events and listener updates always see a fully applied state.
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -28,6 +28,7 @@ from .models import (
 )
 from .rotation import (
     Assignment,
+    AvailabilityWindow,
     PastDinner,
     RotationEngine,
     RotationError,
@@ -37,6 +38,7 @@ from .rotation import (
 EVENT_CHANGED = "dinnersense_changed"
 EVENT_SWAPPED = "dinnersense_swapped"
 EVENT_ROLLED = "dinnersense_rolled"
+EVENT_CONFLICT = "dinnersense_conflict"
 
 MAX_FUTURE_DAYS = 60
 
@@ -55,6 +57,7 @@ class Planner:
         dinners: dict[date, Dinner] | None = None,
         debt: dict[str, int] | None = None,
         dishes: dict[str, Dish] | None = None,
+        manual_windows: list[AvailabilityWindow] | None = None,
         *,
         fire_event: FireEvent,
         save: Callable[[], None],
@@ -65,6 +68,9 @@ class Planner:
         self.dinners: dict[date, Dinner] = dinners or {}
         self.debt: dict[str, int] = debt or {}
         self.dishes: dict[str, Dish] = dishes or {}
+        self.manual_windows: list[AvailabilityWindow] = manual_windows or []
+        self.external_windows: list[AvailabilityWindow] = []
+        self._reported_conflicts: set[tuple[date, str]] = set()
         self._fire = fire_event
         self._save = save
         self._now = now
@@ -93,7 +99,9 @@ class Planner:
     @property
     def engine(self) -> RotationEngine:
         return RotationEngine(
-            [c.id for c in self.cooks], self.settings.dinner_days
+            [c.id for c in self.cooks],
+            self.settings.dinner_days,
+            [*self.manual_windows, *self.external_windows],
         )
 
     # -- reads -------------------------------------------------------------------
@@ -127,20 +135,21 @@ class Planner:
                 self._set_status(dinner, self.settings.unconfirmed_past, "roll")
                 closed += 1
         added = self._fill(today)
-        self._commit([(EVENT_ROLLED, {"date": today.isoformat(),
-                                      "closed": closed, "added": added})])
+        self._commit(
+            [
+                (
+                    EVENT_ROLLED,
+                    {"date": today.isoformat(), "closed": closed, "added": added},
+                )
+            ]
+        )
+        self._check_conflicts(today)
 
     def regenerate(self, today: date) -> None:
-        """Rebuild unlocked future planned dinners."""
-        for day in [
-            d
-            for d, v in self.dinners.items()
-            if d >= today and v.status == STATUS_PLANNED and not v.locked
-        ]:
-            del self.dinners[day]
-        added = self._fill(today)
-        self._commit([(EVENT_ROLLED, {"date": today.isoformat(),
-                                      "closed": 0, "added": added})])
+        """Rebuild unlocked future planned dinners (menus are kept)."""
+        rebuilt = self._rebuild_future(today)
+        self._commit([(EVENT_CHANGED, {"reason": "regenerate", "rebuilt": rebuilt})])
+        self._check_conflicts(today)
 
     def _fill(self, today: date) -> int:
         plan = _to_plan(self.dinners)
@@ -154,6 +163,7 @@ class Planner:
                 date=a.date,
                 cook=a.cook_id,
                 repay=a.repay,
+                debt_after=result.debt_trace.get(a.date),
                 history=[ChangeRecord(self._stamp(), "generated", {"cook": a.cook_id})],
             )
         return len(result.added)
@@ -161,18 +171,154 @@ class Planner:
     def set_cooks(self, cooks: list[Cook], today: date) -> None:
         """Replace the cook list; unlocked future dinners are rebuilt."""
         self.cooks = sorted(cooks, key=lambda c: c.order)
+        self._rebuild_future(today)
         known = {c.id for c in self.cooks}
-        for day in [
-            d
+        self.debt = {k: v for k, v in self.debt.items() if k in known}
+        self._commit([])
+        self._check_conflicts(today)
+
+    def _rebuild_future(self, today: date) -> int:
+        """Reassign cooks on unlocked future dinners, keeping ids, menus, history.
+
+        Locked dinners whose cook no longer exists are rebuilt too. Debt is
+        reset to what it was before today so it isn't counted twice.
+        """
+        known = {c.id for c in self.cooks}
+        old = {
+            d: v
             for d, v in self.dinners.items()
             if d >= today
             and v.status == STATUS_PLANNED
             and (not v.locked or v.cook not in known)
-        ]:
+        }
+        for day in old:
             del self.dinners[day]
-        self.debt = {k: v for k, v in self.debt.items() if k in known}
+        self.debt = {k: v for k, v in self._debt_base(today).items() if k in known}
         self._fill(today)
-        self._commit([])
+        for day, previous in old.items():
+            new = self.dinners.get(day)
+            if new is None:
+                continue  # no longer a dinner day
+            if new.cook != previous.cook:
+                previous.history.append(
+                    ChangeRecord(
+                        self._stamp(),
+                        "regenerated",
+                        {"from": previous.cook, "to": new.cook},
+                    )
+                )
+            previous.cook, previous.repay = new.cook, new.repay
+            previous.debt_after, previous.locked = new.debt_after, False
+            self.dinners[day] = previous
+        return len(old)
+
+    def _debt_base(self, today: date) -> dict[str, int]:
+        past = [
+            d for d, v in self.dinners.items() if d < today and v.debt_after is not None
+        ]
+        return dict(self.dinners[max(past)].debt_after or {}) if past else {}
+
+    # -- availability --------------------------------------------------------------
+
+    def add_unavailable(
+        self, cook_id: str, start: date, end: date, today: date
+    ) -> None:
+        if self.cook(cook_id) is None:
+            raise PlannerError(f"Unknown cook: {cook_id}")
+        if end < start:
+            raise PlannerError("end must not be before start")
+        self.manual_windows.append(AvailabilityWindow(cook_id, start, end))
+        self._availability_changed(today)
+
+    def clear_unavailable(
+        self,
+        cook_id: str,
+        start: date | None,
+        end: date | None,
+        today: date,
+    ) -> None:
+        """Remove the cook's manual windows that overlap start..end (all if open)."""
+        if self.cook(cook_id) is None:
+            raise PlannerError(f"Unknown cook: {cook_id}")
+        self.manual_windows = [
+            w
+            for w in self.manual_windows
+            if w.cook_id != cook_id
+            or (start is not None and w.end < start)
+            or (end is not None and w.start > end)
+        ]
+        self._availability_changed(today)
+
+    def set_external_windows(
+        self, windows: list[AvailabilityWindow], today: date
+    ) -> None:
+        """Windows derived from calendars/entities. Rebuilds only on change."""
+
+        def key(ws: list[AvailabilityWindow]) -> list[tuple[str, date, date]]:
+            return sorted((w.cook_id, w.start, w.end) for w in ws)
+
+        if key(windows) == key(self.external_windows):
+            return
+        self.external_windows = list(windows)
+        self._availability_changed(today)
+
+    def _availability_changed(self, today: date) -> None:
+        rebuilt = self._rebuild_future(today)
+        self._commit([(EVENT_CHANGED, {"reason": "availability", "rebuilt": rebuilt})])
+        self._check_conflicts(today)
+
+    def _check_conflicts(self, today: date) -> None:
+        """Locked dinners are never changed; tell the household instead."""
+        known = {c.id for c in self.cooks}
+        engine = self.engine
+        found = {
+            (d.date, d.cook)
+            for d in self.dinners.values()
+            if d.date >= today
+            and d.status == STATUS_PLANNED
+            and d.locked
+            and d.cook in known
+            and not engine.is_available(d.cook, d.date)
+        }
+        for day, cook_id in sorted(found - self._reported_conflicts):
+            cook = self.cook(cook_id)
+            self._fire(
+                EVENT_CONFLICT,
+                {
+                    "date": day.isoformat(),
+                    "cook": cook_id,
+                    "cook_name": cook.name if cook else cook_id,
+                },
+            )
+        self._reported_conflicts = found
+
+    # -- scores ----------------------------------------------------------------------
+
+    def cook_stats(self, cook_id: str, today: date) -> dict[str, int]:
+        def cooked(days: int) -> int:
+            first = today - timedelta(days=days - 1)
+            return sum(
+                1
+                for d in self.dinners.values()
+                if d.cook == cook_id
+                and d.status == STATUS_DONE
+                and first <= d.date <= today
+            )
+
+        given = taken = 0
+        for dinner in self.dinners.values():
+            for rec in dinner.history:
+                if rec.action != "swap" or not rec.detail.get("requested"):
+                    continue
+                given += rec.detail.get("from") == cook_id
+                taken += rec.detail.get("to") == cook_id
+        return {
+            "cooked_30": cooked(30),
+            "cooked_90": cooked(90),
+            "swaps_given": given,
+            "swaps_taken": taken,
+            "debt": self.debt.get(cook_id, 0),
+        }
 
     # -- user actions ------------------------------------------------------------
 
@@ -186,9 +332,11 @@ class Planner:
                 today,
                 self.settings.horizon_days,
                 self.debt,
-                swappable=lambda a: self.dinners[a.date].status == STATUS_PLANNED
-                if a.date in self.dinners
-                else True,
+                swappable=lambda a: (
+                    self.dinners[a.date].status == STATUS_PLANNED
+                    if a.date in self.dinners
+                    else True
+                ),
             )
         except PastDinner as err:
             raise PlannerError(str(err)) from err
@@ -207,18 +355,18 @@ class Planner:
                 )
         partner = self.dinners[result.date_b]  # type: ignore[index]
         before = [_snapshot(dinner), _snapshot(partner)]
-        dinner.cook, partner.cook = result.plan[day].cook_id, result.plan[
-            partner.date
-        ].cook_id
+        dinner.cook, partner.cook = (
+            result.plan[day].cook_id,
+            result.plan[partner.date].cook_id,
+        )
         dinner.locked = partner.locked = True
         dinner.repay = partner.repay = False
         if self.settings.menu_follows_cook:
             dinner.menu, partner.menu = partner.menu, dinner.menu
         after = [_snapshot(dinner), _snapshot(partner)]
         for d, b in zip((dinner, partner), before, strict=True):
-            d.history.append(
-                ChangeRecord(self._stamp(), "swap", {"from": b["cook"], "to": d.cook})
-            )
+            detail = {"from": b["cook"], "to": d.cook, "requested": d is dinner}
+            d.history.append(ChangeRecord(self._stamp(), "swap", detail))
         payload = {"before": before, "after": after}
         self._commit([(EVENT_SWAPPED, payload), (EVENT_CHANGED, payload)])
 
@@ -279,8 +427,13 @@ class Planner:
         before = _snapshot(dinner)
         title = (title or "").strip() or None
 
-        if title is None and dish_id is None and kind is None and note is None \
-                and rating is None:
+        if (
+            title is None
+            and dish_id is None
+            and kind is None
+            and note is None
+            and rating is None
+        ):
             dinner.menu = None
         else:
             menu = dinner.menu or MenuEntry()
@@ -314,9 +467,7 @@ class Planner:
             return self.dinners[day]
         if day < today:
             # A day from before the integration ran: keep a log-only record.
-            dinner = Dinner(
-                id=uuid4().hex, date=day, cook="", status=STATUS_DONE
-            )
+            dinner = Dinner(id=uuid4().hex, date=day, cook="", status=STATUS_DONE)
             self.dinners[day] = dinner
             return dinner
         if (day - today).days >= MAX_FUTURE_DAYS:
@@ -405,9 +556,7 @@ class Planner:
         if status not in (STATUS_DONE, STATUS_MISSED, STATUS_SKIPPED, STATUS_PLANNED):
             raise PlannerError(f"Unknown status: {status}")
         dinner.history.append(
-            ChangeRecord(
-                self._stamp(), action, {"from": dinner.status, "to": status}
-            )
+            ChangeRecord(self._stamp(), action, {"from": dinner.status, "to": status})
         )
         dinner.status = status
 
@@ -436,4 +585,3 @@ def _snapshot(dinner: Dinner) -> dict[str, Any]:
         "locked": dinner.locked,
         "menu": dinner.menu.to_dict() if dinner.menu else None,
     }
-

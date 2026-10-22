@@ -117,3 +117,29 @@ list_dishes:
   fields:
     config_entry_id:
       selector: { config_entry: { integration: dinnersense } }
+set_unavailable:
+  fields:
+    config_entry_id:
+      selector: { config_entry: { integration: dinnersense } }
+    cook:
+      required: true
+      example: "Libertad"
+      selector: { text: }
+    start:
+      required: true
+      selector: { date: }
+    end:
+      required: true
+      selector: { date: }
+clear_unavailable:
+  fields:
+    config_entry_id:
+      selector: { config_entry: { integration: dinnersense } }
+    cook:
+      required: true
+      example: "Libertad"
+      selector: { text: }
+    start:
+      selector: { date: }
+    end:
+      selector: { date: }

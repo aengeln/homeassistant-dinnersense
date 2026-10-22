@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date
 
 
@@ -40,6 +40,8 @@ class GenerationResult:
     plan: Plan
     added: tuple[Assignment, ...]
     debt: Debt
+    # Debt as it stood right after each added date was assigned.
+    debt_trace: dict[date, Debt] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

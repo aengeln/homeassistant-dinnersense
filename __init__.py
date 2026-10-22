@@ -10,6 +10,7 @@ from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.util import dt as dt_util
 
+from .availability import AvailabilityTracker
 from .const import CONF_COOKS, CONF_SETTINGS
 from .models import Cook, Settings
 from .planner import Planner
@@ -29,7 +30,7 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: DinnerSenseConfigEntry) -> bool:
     store = HouseholdStore(hass, entry.entry_id)
-    dinners, debt, dishes = await store.async_load()
+    dinners, debt, dishes, windows = await store.async_load()
     cooks = [Cook.from_dict(c) for c in entry.options.get(CONF_COOKS, [])]
     settings = Settings.from_dict(entry.options.get(CONF_SETTINGS, {}))
 
@@ -45,12 +46,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: DinnerSenseConfigEntry) 
         store.schedule_save(holder[0])
 
     planner = Planner(
-        cooks, settings, dinners, debt, dishes, fire_event=fire, save=save, now=now
+        cooks,
+        settings,
+        dinners,
+        debt,
+        dishes,
+        windows,
+        fire_event=fire,
+        save=save,
+        now=now,
     )
     holder.append(planner)
     entry.runtime_data = DinnerSenseData(planner, store)
 
+    tracker = AvailabilityTracker(hass, planner)
     if cooks:
+        await tracker.async_refresh()
         _roll(planner)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -60,7 +71,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: DinnerSenseConfigEntry) 
     @callback
     def _nightly(_: datetime) -> None:
         if planner.cooks:
-            _roll(planner)
+            hass.async_create_task(_nightly_roll())
+
+    async def _nightly_roll() -> None:
+        await tracker.async_refresh()  # calendars may have changed overnight
+        _roll(planner)
 
     @callback
     def _midnight(_: datetime) -> None:
@@ -71,6 +86,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: DinnerSenseConfigEntry) 
         async_track_time_change(hass, _nightly, hour=hour, minute=minute, second=0),
         async_track_time_change(hass, _midnight, hour=0, minute=0, second=1),
     ]
+    unsubs += tracker.async_start()
     for unsub in unsubs:
         entry.async_on_unload(unsub)
     entry.async_on_unload(entry.add_update_listener(_async_reload))

@@ -20,6 +20,8 @@ class Cook:
     order: int = 0
     person_entity: str | None = None
     color: str | None = None
+    # Availability sources, e.g. {"type": "calendar", "entity_id": ..., "keyword": ...}
+    availability: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.__dict__)
@@ -92,6 +94,7 @@ class Dinner:
     status: str = STATUS_PLANNED
     locked: bool = False
     repay: bool = False
+    debt_after: dict[str, int] | None = None
     menu: MenuEntry | None = None
     history: list[ChangeRecord] = field(default_factory=list)
 
@@ -103,6 +106,7 @@ class Dinner:
             "status": self.status,
             "locked": self.locked,
             "repay": self.repay,
+            "debt_after": self.debt_after,
             "menu": self.menu.to_dict() if self.menu else None,
             "history": [h.to_dict() for h in self.history],
         }
@@ -116,6 +120,7 @@ class Dinner:
             status=data.get("status", STATUS_PLANNED),
             locked=data.get("locked", False),
             repay=data.get("repay", False),
+            debt_after=data.get("debt_after"),
             menu=MenuEntry.from_dict(data["menu"]) if data.get("menu") else None,
             history=[ChangeRecord.from_dict(h) for h in data.get("history", [])],
         )
@@ -155,7 +160,14 @@ def build_cooks(names: list[str], existing: list[Cook] | None = None) -> list[Co
     for order, raw in enumerate(n.strip() for n in names if n.strip()):
         previous = by_name.get(raw.casefold())
         if previous and previous.id not in used:
-            cook = Cook(previous.id, raw, order, previous.person_entity, previous.color)
+            cook = Cook(
+                previous.id,
+                raw,
+                order,
+                previous.person_entity,
+                previous.color,
+                previous.availability,
+            )
         else:
             base = slugify(raw, "cook")
             cook_id, i = base, 2

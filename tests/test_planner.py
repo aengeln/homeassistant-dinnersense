@@ -17,7 +17,9 @@ class Harness:
         self.events: list[tuple[str, dict]] = []
         self.saves = 0
         self.notified = 0
-        cooks = [models.Cook(c, c.title(), i) for i, c in enumerate(["ann", "bob", "cy"])]
+        cooks = [
+            models.Cook(c, c.title(), i) for i, c in enumerate(["ann", "bob", "cy"])
+        ]
         self.planner = planner_mod.Planner(
             cooks,
             models.Settings(**settings),
@@ -58,7 +60,9 @@ def test_unconfirmed_past_can_be_missed():
     h = Harness(unconfirmed_past="missed")
     h.planner.roll(TODAY)
     h.planner.roll(TODAY + timedelta(days=3))
-    assert [h.planner.dinners[TODAY + timedelta(days=i)].status for i in range(3)] == ["missed"] * 3
+    assert [h.planner.dinners[TODAY + timedelta(days=i)].status for i in range(3)] == [
+        "missed"
+    ] * 3
 
 
 def test_roll_never_deletes_history_or_overwrites_locked():
@@ -171,7 +175,11 @@ def test_set_menu_free_text_for_future_day():
     h.planner.roll(TODAY)
     h.planner.set_menu(days(3), TODAY, title="Pizza from Bella", kind="eating_out")
     menu = h.planner.dinners[days(3)].menu
-    assert (menu.title, menu.dish_id, menu.kind) == ("Pizza from Bella", None, "eating_out")
+    assert (menu.title, menu.dish_id, menu.kind) == (
+        "Pizza from Bella",
+        None,
+        "eating_out",
+    )
     assert h.events[-1][0] == "dinnersense_changed"
     assert h.events[-1][1]["after"][0]["menu"]["title"] == "Pizza from Bella"
 
@@ -295,3 +303,131 @@ def test_swap_menu_follows_cook_event_carries_menu():
     h.planner.set_menu(days(3), TODAY, title="Tacos")
     h.planner.swap(days(3), "cy", TODAY)
     assert h.planner.dinners[days(2)].menu.title == "Tacos"
+
+
+# -- availability, debt, conflicts, scores -----------------------------------
+
+
+def snapshot(h):
+    return (
+        {d: v.cook for d, v in h.planner.dinners.items()},
+        dict(h.planner.debt),
+    )
+
+
+def test_away_cook_gets_no_dinners_in_range_and_counts_even_out_after():
+    h = Harness(horizon_days=14)
+    h.planner.roll(TODAY)
+    h.planner.add_unavailable("bob", days(0), days(5), TODAY)
+    assert "bob" not in h.cooks(TODAY, 6)
+    # After the horizon is extended far enough, counts even out.
+    h.planner.roll(days(14))
+    h.planner.roll(days(28))
+    counts = {c: 0 for c in ("ann", "bob", "cy")}
+    for d in h.planner.dinners.values():
+        counts[d.cook] += 1
+    assert max(counts.values()) - min(counts.values()) <= 3
+
+
+def test_rebuild_keeps_menus_ids_and_locked_days():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.set_menu(days(1), TODAY, title="Soup")
+    ident = h.planner.dinners[days(1)].id
+    h.planner.reassign(days(2), "ann")  # locked
+    h.planner.add_unavailable("bob", days(0), days(3), TODAY)
+    kept = h.planner.dinners[days(1)]
+    assert kept.id == ident and kept.menu.title == "Soup" and kept.cook != "bob"
+    assert (
+        h.planner.dinners[days(2)].cook == "ann" and h.planner.dinners[days(2)].locked
+    )
+
+
+def test_clear_unavailable_restores_the_original_plan():
+    h = Harness()
+    h.planner.roll(TODAY)
+    original = snapshot(h)
+    h.planner.add_unavailable("bob", days(0), days(5), TODAY)
+    assert snapshot(h) != original
+    h.planner.clear_unavailable("bob", None, None, TODAY)
+    assert snapshot(h) == original
+
+
+def test_rebuilding_twice_does_not_double_count_debt():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.add_unavailable("bob", days(0), days(5), TODAY)
+    once = snapshot(h)
+    h.planner.regenerate(TODAY)
+    h.planner.regenerate(TODAY)
+    assert snapshot(h) == once
+
+
+def test_external_windows_rebuild_only_when_changed():
+    h = Harness()
+    h.planner.roll(TODAY)
+    win = [planner_mod.AvailabilityWindow("bob", days(0), days(2))]
+    h.planner.set_external_windows(win, TODAY)
+    saves, events = h.saves, len(h.events)
+    h.planner.set_external_windows(list(win), TODAY)
+    assert (h.saves, len(h.events)) == (saves, events)
+    h.planner.set_external_windows([], TODAY)
+    assert h.saves == saves + 1
+
+
+def test_unavailable_validation():
+    h = Harness()
+    h.planner.roll(TODAY)
+    with pytest.raises(planner_mod.PlannerError):
+        h.planner.add_unavailable("zed", days(0), days(1), TODAY)
+    with pytest.raises(planner_mod.PlannerError):
+        h.planner.add_unavailable("bob", days(3), days(1), TODAY)
+
+
+def conflicts(h):
+    return [d for n, d in h.events if n == "dinnersense_conflict"]
+
+
+def test_locked_dinner_conflict_fires_once_and_is_not_changed():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.reassign(days(4), "cy")
+    h.planner.add_unavailable("cy", days(3), days(5), TODAY)
+    assert h.planner.dinners[days(4)].cook == "cy"
+    assert [c["date"] for c in conflicts(h)] == [days(4).isoformat()]
+    h.planner.regenerate(TODAY)
+    assert len(conflicts(h)) == 1  # not repeated
+
+
+def test_unlocked_dinner_never_conflicts():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.add_unavailable("bob", days(0), days(9), TODAY)
+    assert conflicts(h) == []
+
+
+def test_conflict_refires_after_it_clears():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.reassign(days(4), "cy")
+    h.planner.add_unavailable("cy", days(4), days(4), TODAY)
+    h.planner.clear_unavailable("cy", None, None, TODAY)
+    h.planner.add_unavailable("cy", days(4), days(4), TODAY)
+    assert len(conflicts(h)) == 2
+
+
+def test_cook_stats_cooked_counts_and_swaps():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.swap(days(3), "cy", TODAY)  # ann's day handed to cy
+    h.planner.roll(days(4))  # days 0..3 become done
+    ann = h.planner.cook_stats("ann", days(4))
+    cy = h.planner.cook_stats("cy", days(4))
+    assert ann["swaps_given"] == 1 and ann["swaps_taken"] == 0
+    assert cy["swaps_taken"] == 1 and cy["swaps_given"] == 0
+    assert (
+        ann["cooked_30"]
+        + cy["cooked_30"]
+        + h.planner.cook_stats("bob", days(4))["cooked_30"]
+        == 4
+    )

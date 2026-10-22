@@ -26,7 +26,16 @@ def cooks(plan, start=TODAY, days=10):
 def test_generates_full_horizon_in_rotation_order():
     result = RotationEngine(COOKS).generate({}, TODAY, 10)
     assert cooks(result.plan) == [
-        "ann", "bob", "cy", "ann", "bob", "cy", "ann", "bob", "cy", "ann",
+        "ann",
+        "bob",
+        "cy",
+        "ann",
+        "bob",
+        "cy",
+        "ann",
+        "bob",
+        "cy",
+        "ann",
     ]
     assert len(result.added) == 10
 
@@ -99,9 +108,13 @@ def test_swap_extends_horizon_when_cook_has_no_upcoming_day():
 
 
 def test_swap_with_no_upcoming_day_even_after_extension_raises():
-    engine = RotationEngine(COOKS, dinner_days={0}, availability=[
-        AvailabilityWindow("bob", TODAY, TODAY + timedelta(days=365)),
-    ])
+    engine = RotationEngine(
+        COOKS,
+        dinner_days={0},
+        availability=[
+            AvailabilityWindow("bob", TODAY, TODAY + timedelta(days=365)),
+        ],
+    )
     plan = engine.generate({}, TODAY, 7).plan
     with pytest.raises(NoUpcomingDinner):
         engine.swap(plan, TODAY, "bob", TODAY, 7)

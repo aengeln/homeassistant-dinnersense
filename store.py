@@ -11,6 +11,7 @@ from homeassistant.helpers.storage import Store
 from .const import DOMAIN
 from .models import Dinner, Dish
 from .planner import Planner
+from .rotation import AvailabilityWindow
 
 STORAGE_VERSION = 1
 SAVE_DELAY = 1
@@ -38,15 +39,26 @@ class HouseholdStore:
 
     async def async_load(
         self,
-    ) -> tuple[dict[date, Dinner], dict[str, int], dict[str, Dish]]:
+    ) -> tuple[
+        dict[date, Dinner],
+        dict[str, int],
+        dict[str, Dish],
+        list[AvailabilityWindow],
+    ]:
         data = await self._store.async_load()
         if not data:
-            return {}, {}, {}
+            return {}, {}, {}, []
         dinners = {
             d.date: d for d in (Dinner.from_dict(x) for x in data.get("dinners", []))
         }
         dishes = {d.id: d for d in (Dish.from_dict(x) for x in data.get("dishes", []))}
-        return dinners, dict(data.get("debt", {})), dishes
+        windows = [
+            AvailabilityWindow(
+                w["cook"], date.fromisoformat(w["start"]), date.fromisoformat(w["end"])
+            )
+            for w in data.get("unavailable", [])
+        ]
+        return dinners, dict(data.get("debt", {})), dishes, windows
 
     @staticmethod
     def _payload(planner: Planner) -> dict[str, Any]:
@@ -55,6 +67,14 @@ class HouseholdStore:
             "debt": dict(planner.debt),
             "cooks": [c.to_dict() for c in planner.cooks],
             "dishes": [d.to_dict() for d in planner.dishes.values()],
+            "unavailable": [
+                {
+                    "cook": w.cook_id,
+                    "start": w.start.isoformat(),
+                    "end": w.end.isoformat(),
+                }
+                for w in planner.manual_windows
+            ],
         }
 
     def schedule_save(self, planner: Planner) -> None:

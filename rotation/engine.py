@@ -86,6 +86,7 @@ class RotationEngine:
         new_plan: Plan = dict(plan)
         new_debt: Debt = dict(debt or {})
         added: list[Assignment] = []
+        trace: dict[date, Debt] = {}
         for offset in range(horizon_days):
             day = today + timedelta(days=offset)
             if day.weekday() not in self.dinner_days or day in new_plan:
@@ -94,7 +95,8 @@ class RotationEngine:
             assignment = Assignment(day, cook_id, repay=repay)
             new_plan[day] = assignment
             added.append(assignment)
-        return GenerationResult(new_plan, tuple(added), new_debt)
+            trace[day] = dict(new_debt)
+        return GenerationResult(new_plan, tuple(added), new_debt, trace)
 
     def _pick(self, plan: Plan, day: date, debt: Debt) -> tuple[str, bool]:
         """Return the cook for ``day`` and whether it is a debt-repayment turn."""

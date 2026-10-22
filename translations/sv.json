@@ -17,6 +17,13 @@
   "options": {
     "step": {
       "init": {
+        "title": "Dinner Sense",
+        "menu_options": {
+          "settings": "Planinställningar",
+          "cooks": "Kockar och tillgänglighet"
+        }
+      },
+      "settings": {
         "title": "Inställningar för Dinner Sense",
         "data": {
           "cook_names": "Kockar (turordning, separerade med komma)",
@@ -26,7 +33,30 @@
           "menu_follows_cook": "Menyn följer kocken vid byte",
           "unconfirmed_past": "Obekräftade tidigare middagar räknas som"
         }
+      },
+      "cooks": {
+        "title": "Välj en kock",
+        "data": {
+          "cook": "Kock"
+        }
+      },
+      "cook": {
+        "title": "Redigera {cook}",
+        "description": "Valfritt. Varje källa som säger att kocken är borta håller kocken utanför turordningen.",
+        "data": {
+          "person_entity": "Personentitet",
+          "color": "Färg (hex, för dashboards)",
+          "away_calendar": "Frånvarokalender",
+          "away_keyword": "Nyckelord i kalendern (standard: away)",
+          "away_until": "Borta till (datumhjälpare)",
+          "away_from": "Borta från (datumhjälpare)",
+          "away_to": "Borta till (datumhjälpare)",
+          "away_sensor": "Borta nu (binärsensor, endast idag)"
+        }
       }
+    },
+    "abort": {
+      "no_cooks": "Lägg till kockar under Planinställningar först."
     }
   },
   "selector": {
@@ -63,6 +93,9 @@
       },
       "dinner_tomorrow": {
         "name": "Middag imorgon"
+      },
+      "dinner_score": {
+        "name": "Middagspoäng {cook}"
       }
     },
     "select": {
@@ -302,6 +335,50 @@
       "fields": {
         "config_entry_id": {
           "name": "Hushåll",
+          "description": ""
+        }
+      }
+    },
+    "set_unavailable": {
+      "name": "Markera som borta",
+      "description": "Markera en kock som borta under ett datumintervall. Olåsta kommande middagar byggs om.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
+          "description": ""
+        },
+        "cook": {
+          "name": "Kock",
+          "description": ""
+        },
+        "start": {
+          "name": "Start",
+          "description": ""
+        },
+        "end": {
+          "name": "Slut",
+          "description": ""
+        }
+      }
+    },
+    "clear_unavailable": {
+      "name": "Ta bort frånvaro",
+      "description": "Ta bort en kocks manuella frånvaro som överlappar datumen (alla om inga anges).",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
+          "description": ""
+        },
+        "cook": {
+          "name": "Kock",
+          "description": ""
+        },
+        "start": {
+          "name": "Start",
+          "description": ""
+        },
+        "end": {
+          "name": "Slut",
           "description": ""
         }
       }

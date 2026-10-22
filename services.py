@@ -34,6 +34,22 @@ _BASE = {vol.Optional(ATTR_CONFIG_ENTRY_ID): cv.string}
 _DAY = {**_BASE, vol.Required(ATTR_DATE): cv.date}
 SWAP_SCHEMA = vol.Schema({**_DAY, vol.Required(ATTR_COOK): cv.string})
 DAY_SCHEMA = vol.Schema(_DAY)
+UNAVAILABLE_SCHEMA = vol.Schema(
+    {
+        **_BASE,
+        vol.Required(ATTR_COOK): cv.string,
+        vol.Required(ATTR_START): cv.date,
+        vol.Required(ATTR_END): cv.date,
+    }
+)
+CLEAR_UNAVAILABLE_SCHEMA = vol.Schema(
+    {
+        **_BASE,
+        vol.Required(ATTR_COOK): cv.string,
+        vol.Optional(ATTR_START): cv.date,
+        vol.Optional(ATTR_END): cv.date,
+    }
+)
 PLAN_SCHEMA = vol.Schema(
     {**_BASE, vol.Optional(ATTR_START): cv.date, vol.Optional(ATTR_END): cv.date}
 )
@@ -137,9 +153,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
     def get_plan(p: Planner, c: ServiceCall) -> ServiceResponse:
         start = c.data.get(ATTR_START, today())
         end = c.data.get(ATTR_END, date.max)
-        return {
-            "dinners": [_dinner_dict(p, d.date) for d in p.get_plan(start, end)]
-        }
+        return {"dinners": [_dinner_dict(p, d.date) for d in p.get_plan(start, end)]}
 
     def get_history(p: Planner, c: ServiceCall) -> ServiceResponse:
         found = p.get_history(c.data[ATTR_START], c.data[ATTR_END], today())
@@ -175,6 +189,22 @@ def async_setup_services(hass: HomeAssistant) -> None:
         dishes = sorted(p.dishes.values(), key=lambda d: d.name.casefold())
         return {"dishes": [d.to_dict() for d in dishes]}
 
+    def set_unavailable(p: Planner, c: ServiceCall) -> None:
+        p.add_unavailable(
+            _cook_id(p, c.data[ATTR_COOK]),
+            c.data[ATTR_START],
+            c.data[ATTR_END],
+            today(),
+        )
+
+    def clear_unavailable(p: Planner, c: ServiceCall) -> None:
+        p.clear_unavailable(
+            _cook_id(p, c.data[ATTR_COOK]),
+            c.data.get(ATTR_START),
+            c.data.get(ATTR_END),
+            today(),
+        )
+
     def skip(p: Planner, c: ServiceCall) -> None:
         p.skip(c.data[ATTR_DATE])
 
@@ -193,6 +223,8 @@ def async_setup_services(hass: HomeAssistant) -> None:
         ("complete", DAY_SCHEMA, complete, none),
         ("regenerate", ENTRY_SCHEMA, regenerate, none),
         ("get_plan", PLAN_SCHEMA, get_plan, only),
+        ("set_unavailable", UNAVAILABLE_SCHEMA, set_unavailable, none),
+        ("clear_unavailable", CLEAR_UNAVAILABLE_SCHEMA, clear_unavailable, none),
         ("get_history", HISTORY_SCHEMA, get_history, only),
         ("set_menu", MENU_SCHEMA, set_menu, none),
         ("create_dish", CREATE_DISH_SCHEMA, create_dish, optional),

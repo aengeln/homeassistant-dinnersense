@@ -15,6 +15,13 @@ from homeassistant.config_entries import (
 from homeassistant.core import callback
 from homeassistant.helpers import selector
 
+from .availability import (
+    DEFAULT_KEYWORD,
+    SOURCE_BINARY,
+    SOURCE_CALENDAR,
+    SOURCE_RANGE,
+    SOURCE_UNTIL,
+)
 from .const import (
     CONF_COOKS,
     CONF_DINNER_DAYS,
@@ -30,6 +37,40 @@ from .const import (
 from .models import Cook, Settings, build_cooks
 
 CONF_COOK_NAMES = "cook_names"
+CONF_COOK = "cook"
+CONF_PERSON = "person_entity"
+CONF_COLOR = "color"
+CONF_AWAY_CALENDAR = "away_calendar"
+CONF_AWAY_KEYWORD = "away_keyword"
+CONF_AWAY_UNTIL = "away_until"
+CONF_AWAY_FROM = "away_from"
+CONF_AWAY_TO = "away_to"
+CONF_AWAY_SENSOR = "away_sensor"
+
+
+def _sources_from_input(data: dict[str, Any]) -> list[dict[str, Any]]:
+    sources: list[dict[str, Any]] = []
+    if data.get(CONF_AWAY_CALENDAR):
+        sources.append(
+            {
+                "type": SOURCE_CALENDAR,
+                "entity_id": data[CONF_AWAY_CALENDAR],
+                "keyword": (data.get(CONF_AWAY_KEYWORD) or DEFAULT_KEYWORD).strip(),
+            }
+        )
+    if data.get(CONF_AWAY_UNTIL):
+        sources.append({"type": SOURCE_UNTIL, "entity_id": data[CONF_AWAY_UNTIL]})
+    if data.get(CONF_AWAY_FROM) and data.get(CONF_AWAY_TO):
+        sources.append(
+            {
+                "type": SOURCE_RANGE,
+                "from_entity": data[CONF_AWAY_FROM],
+                "to_entity": data[CONF_AWAY_TO],
+            }
+        )
+    if data.get(CONF_AWAY_SENSOR):
+        sources.append({"type": SOURCE_BINARY, "entity_id": data[CONF_AWAY_SENSOR]})
+    return sources
 
 
 def _split(names: str) -> list[str]:
@@ -73,7 +114,94 @@ class DinnerSenseConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class DinnerSenseOptionsFlow(OptionsFlow):
+    def __init__(self) -> None:
+        self._cook_id: str | None = None
+
     async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        return self.async_show_menu(step_id="init", menu_options=["settings", "cooks"])
+
+    async def async_step_cooks(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Pick a cook to edit person, colour and availability sources."""
+        cooks = [
+            Cook.from_dict(c) for c in self.config_entry.options.get(CONF_COOKS, [])
+        ]
+        if not cooks:
+            return self.async_abort(reason="no_cooks")
+        if user_input is not None:
+            self._cook_id = user_input[CONF_COOK]
+            return await self.async_step_cook()
+        return self.async_show_form(
+            step_id="cooks",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_COOK): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[
+                                selector.SelectOptionDict(value=c.id, label=c.name)
+                                for c in cooks
+                            ]
+                        )
+                    )
+                }
+            ),
+        )
+
+    async def async_step_cook(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        options = self.config_entry.options
+        cooks = [Cook.from_dict(c) for c in options.get(CONF_COOKS, [])]
+        cook = next(c for c in cooks if c.id == self._cook_id)
+        sources = {s["type"]: s for s in cook.availability}
+
+        if user_input is not None:
+            cook.person_entity = user_input.get(CONF_PERSON) or None
+            cook.color = user_input.get(CONF_COLOR) or None
+            cook.availability = _sources_from_input(user_input)
+            return self.async_create_entry(
+                data={
+                    CONF_COOKS: [c.to_dict() for c in cooks],
+                    CONF_SETTINGS: options.get(CONF_SETTINGS, {}),
+                }
+            )
+
+        def opt(key: str, value: Any) -> vol.Optional:
+            return vol.Optional(
+                key, description={"suggested_value": value} if value else None
+            )
+
+        def entity(domain: str) -> selector.EntitySelector:
+            return selector.EntitySelector(selector.EntitySelectorConfig(domain=domain))
+
+        cal = sources.get(SOURCE_CALENDAR, {})
+        rng = sources.get(SOURCE_RANGE, {})
+        schema = vol.Schema(
+            {
+                opt(CONF_PERSON, cook.person_entity): entity("person"),
+                opt(CONF_COLOR, cook.color): selector.TextSelector(),
+                opt(CONF_AWAY_CALENDAR, cal.get("entity_id")): entity("calendar"),
+                opt(CONF_AWAY_KEYWORD, cal.get("keyword")): selector.TextSelector(),
+                opt(CONF_AWAY_UNTIL, sources.get(SOURCE_UNTIL, {}).get("entity_id")): (
+                    entity("input_datetime")
+                ),
+                opt(CONF_AWAY_FROM, rng.get("from_entity")): entity("input_datetime"),
+                opt(CONF_AWAY_TO, rng.get("to_entity")): entity("input_datetime"),
+                opt(
+                    CONF_AWAY_SENSOR, sources.get(SOURCE_BINARY, {}).get("entity_id")
+                ): entity("binary_sensor"),
+            }
+        )
+        return self.async_show_form(
+            step_id="cook",
+            data_schema=schema,
+            description_placeholders={"cook": cook.name},
+        )
+
+    async def async_step_settings(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         options = self.config_entry.options
@@ -140,4 +268,4 @@ class DinnerSenseOptionsFlow(OptionsFlow):
                 ),
             }
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
+        return self.async_show_form(step_id="settings", data_schema=schema)
