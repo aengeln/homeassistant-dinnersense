@@ -964,3 +964,134 @@ async def test_today_sensor_exposes_the_recipe_with_timers(
     assert hass.states.get("sensor.test_household_dinner_today").attributes[
         "recipe"
     ] == {"steps": ["Just cook"]}
+
+
+# -- persistence without a clean unload (crash / power loss) ----------------------
+
+
+async def test_changes_reach_storage_without_any_unload(
+    hass, entry, freezer, hass_storage
+) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    await hass.services.async_call(
+        DOMAIN, "set_menu", {"date": "2026-03-02", "title": "Pasta"}, blocking=True
+    )
+    await hass.services.async_call(
+        DOMAIN, "set_menu", {"date": "2026-03-03", "going_out": ["ann"]}, blocking=True
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "set_unavailable",
+        {"cook": "cy", "start": "2026-03-08", "end": "2026-03-09"},
+        blocking=True,
+    )
+    await hass.services.async_call(
+        DOMAIN, "create_dish", {"name": "Tacos"}, blocking=True, return_response=True
+    )
+    # Let the delayed write fire; the entry is NOT unloaded or reloaded.
+    freezer.tick(timedelta(seconds=5))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+
+    saved = hass_storage[f"{DOMAIN}.{entry.entry_id}"]["data"]
+    menus = {d["date"]: d["menu"] for d in saved["dinners"] if d.get("menu")}
+    assert menus["2026-03-02"]["title"] == "Pasta"
+    assert menus["2026-03-03"]["going_out"] == [entry.options["cooks"][0]["id"]]
+    assert saved["unavailable"] == [
+        {"cook": "cy", "start": "2026-03-08", "end": "2026-03-09"}
+    ]
+    assert [d["name"] for d in saved["dishes"]] == ["Tacos"]
+    assert len(saved["dinners"]) == 10
+
+
+async def test_values_survive_a_reboot_on_a_later_day(
+    hass, entry, freezer, hass_storage
+) -> None:
+    freezer.move_to(NOW)  # Mon 2 Mar, 04:00 local
+    await _setup(hass, entry)
+    await hass.services.async_call(
+        DOMAIN, "set_menu", {"date": "2026-03-02", "title": "Pasta"}, blocking=True
+    )
+    await hass.services.async_call(
+        DOMAIN, "set_menu", {"date": "2026-03-05", "title": "Fish"}, blocking=True
+    )
+    await hass.services.async_call(
+        "select",
+        "select_option",
+        {"entity_id": "select.test_household_dinner_day_3", "option": "Cy"},
+        blocking=True,
+    )
+    before = {
+        d: (hass.states.get(f"select.test_household_dinner_day_{d}").state)
+        for d in range(10)
+    }
+    freezer.tick(timedelta(seconds=5))
+    async_fire_time_changed(hass)
+    await hass.async_block_till_done()
+    assert await hass.config_entries.async_unload(entry.entry_id)
+
+    # Reboot two days later (Wed 4 Mar): old slot k is now slot k - 2.
+    freezer.move_to("2026-03-04 12:00:00+00:00")
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    after = {
+        d: hass.states.get(f"select.test_household_dinner_day_{d}").state
+        for d in range(8)
+    }
+    assert after == {d: before[d + 2] for d in range(8)}  # same cook per date
+    # The swap moved Fish with the cook to Wed 4 Mar, which is today now.
+    assert hass.states.get("text.test_household_dinner_menu_day_0").state == "Fish"
+    assert hass.states.get("select.test_household_dinner_day_1").attributes["locked"]
+    # Monday's dinner is in the past now but still in the log with its menu.
+    hist = await hass.services.async_call(
+        DOMAIN,
+        "get_history",
+        {"start": "2026-03-02", "end": "2026-03-04"},
+        blocking=True,
+        return_response=True,
+    )
+    assert [(d["date"], d["menu_title"], d["status"]) for d in hist["dinners"]][0] == (
+        "2026-03-02",
+        "Pasta",
+        "done",
+    )
+    # Still a full horizon from the new today.
+    assert hass.states.get("select.test_household_dinner_day_9").state != "unavailable"
+
+
+async def test_values_survive_an_immediate_reboot(hass, entry, freezer) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    await hass.services.async_call(
+        DOMAIN, "set_menu", {"date": "2026-03-02", "title": "Pasta"}, blocking=True
+    )
+    for _ in range(3):  # several reboots in a row
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        assert hass.states.get("text.test_household_dinner_menu_day_0").state == "Pasta"
+        assert hass.states.get("sensor.test_household_dinner_today").state == "Ann"
+
+
+async def test_broken_availability_sources_never_stop_setup(hass, freezer) -> None:
+    freezer.move_to(NOW)
+    entry = _entry_with(
+        hass,
+        {
+            # missing keys, wrong types, a calendar that blows up
+            "ann": [{"type": "until"}, {"type": "range", "from_entity": "x"}],
+            "bob": [{"type": "calendar", "entity_id": "calendar.family"}],
+            "cy": [{"type": "binary_sensor", "entity_id": 42}, {"type": "mystery"}],
+        },
+    )
+    with patch.object(
+        AvailabilityTracker,
+        "_calendar_events",
+        side_effect=RuntimeError("calendar not ready"),
+    ):
+        await _setup(hass, entry)
+    assert entry.state.value == "loaded"
+    assert hass.states.get("sensor.test_household_dinner_today").state == "Ann"
+    assert len(_slot_cooks(hass)) == 10

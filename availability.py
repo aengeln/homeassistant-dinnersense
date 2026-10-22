@@ -38,14 +38,25 @@ REFRESH_INTERVAL = timedelta(minutes=30)
 
 
 def watched_entities(cooks: list[Cook]) -> list[str]:
-    """Entities whose state changes should trigger a refresh."""
+    """Entities whose state changes should trigger a refresh.
+
+    Malformed sources (missing or non-string entity ids) are skipped.
+    """
     found: set[str] = set()
     for cook in cooks:
         for src in cook.availability:
-            if src.get("type") in (SOURCE_UNTIL, SOURCE_BINARY):
-                found.add(src["entity_id"])
-            elif src.get("type") == SOURCE_RANGE:
-                found.update((src["from_entity"], src["to_entity"]))
+            kind = src.get("type")
+            if kind in (SOURCE_UNTIL, SOURCE_BINARY):
+                keys = ("entity_id",)
+            elif kind == SOURCE_RANGE:
+                keys = ("from_entity", "to_entity")
+            else:
+                continue
+            found.update(
+                value
+                for key in keys
+                if isinstance(value := src.get(key), str) and value
+            )
     return sorted(found)
 
 
@@ -127,20 +138,40 @@ class AvailabilityTracker:
         self.planner = planner
 
     async def async_refresh(self, _: Any = None) -> None:
+        """Re-read all sources. Never raises: a broken source must not stop setup.
+
+        At boot a calendar or helper may not be ready yet; then that source just
+        counts as "no windows" until the next refresh.
+        """
+        try:
+            await self._async_refresh()
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception(
+                "Could not refresh cook availability; keeping the last known"
+            )
+
+    async def _async_refresh(self) -> None:
         today = dt_util.now().date()
         windows: list[AvailabilityWindow] = []
         calendar_cache: dict[str, list[dict[str, Any]]] = {}
         for cook in self.planner.cooks:
             for source in cook.availability:
-                events: list[dict[str, Any]] = []
-                if source.get("type") == SOURCE_CALENDAR:
-                    entity_id = source["entity_id"]
-                    if entity_id not in calendar_cache:
-                        calendar_cache[entity_id] = await self._calendar_events(
-                            entity_id, today
-                        )
-                    events = calendar_cache[entity_id]
-                windows += source_windows(cook.id, source, today, self._state, events)
+                try:
+                    events: list[dict[str, Any]] = []
+                    if source.get("type") == SOURCE_CALENDAR:
+                        entity_id = source["entity_id"]
+                        if entity_id not in calendar_cache:
+                            calendar_cache[entity_id] = await self._calendar_events(
+                                entity_id, today
+                            )
+                        events = calendar_cache[entity_id]
+                    windows += source_windows(
+                        cook.id, source, today, self._state, events
+                    )
+                except Exception:  # noqa: BLE001
+                    _LOGGER.exception(
+                        "Ignoring availability source %s for %s", source, cook.name
+                    )
         self.planner.set_external_windows(windows, today)
 
     def _state(self, entity_id: str) -> str | None:
