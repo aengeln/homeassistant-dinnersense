@@ -894,3 +894,73 @@ async def test_recipe_timers_roundtrip_through_services(hass, entry, freezer) ->
             },
             blocking=True,
         )
+
+
+# -- recipe attribute for cooking-mode dashboards ----------------------------------
+
+
+async def test_today_sensor_exposes_the_recipe_with_timers(
+    hass, entry, freezer
+) -> None:
+    from custom_components.dinnersense.sensor import DinnerDaySensor
+
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    recipe = {
+        "servings": 2,
+        "ingredients": [{"name": "Noodles", "quantity": "200 g"}],
+        "steps": ["Brown the chicken", "Boil water", "Cook noodles"],
+        "timers": [
+            {"name": "Noodles", "minutes": 4, "step": 3},
+            {"name": "Chicken", "minutes": 8, "step": 1},
+        ],
+    }
+    await hass.services.async_call(
+        DOMAIN,
+        "create_dish",
+        {"name": "Chicken noodles", "recipe": recipe},
+        blocking=True,
+        return_response=True,
+    )
+    # No menu yet, then a free-text menu: no recipe.
+    assert (
+        hass.states.get("sensor.test_household_dinner_today").attributes["recipe"]
+        is None
+    )
+    await hass.services.async_call(
+        DOMAIN, "set_menu", {"date": "2026-03-02", "title": "Pizza"}, blocking=True
+    )
+    assert (
+        hass.states.get("sensor.test_household_dinner_today").attributes["recipe"]
+        is None
+    )
+    # A linked dish: today and tomorrow carry its recipe.
+    await hass.services.async_call(
+        DOMAIN,
+        "set_menu",
+        {"date": "2026-03-02", "title": "chicken noodles"},
+        blocking=True,
+    )
+    await hass.services.async_call(
+        DOMAIN,
+        "set_menu",
+        {"date": "2026-03-03", "dish_id": "chicken_noodles"},
+        blocking=True,
+    )
+    for sensor in ("today", "tomorrow"):
+        got = hass.states.get(f"sensor.test_household_dinner_{sensor}").attributes[
+            "recipe"
+        ]
+        assert got["timers"] == recipe["timers"]
+        assert got["steps"] == recipe["steps"]
+    assert "recipe" in DinnerDaySensor._unrecorded_attributes
+    # Editing the dish updates the attribute.
+    await hass.services.async_call(
+        DOMAIN,
+        "update_dish",
+        {"dish_id": "chicken_noodles", "recipe": {"steps": ["Just cook"]}},
+        blocking=True,
+    )
+    assert hass.states.get("sensor.test_household_dinner_today").attributes[
+        "recipe"
+    ] == {"steps": ["Just cook"]}

@@ -27,6 +27,9 @@ async def async_setup_entry(
 
 
 class DinnerDaySensor(DinnerSenseEntity, SensorEntity):
+    # A recipe can be large and changes rarely: keep it out of the history.
+    _unrecorded_attributes = frozenset({"recipe"})
+
     def __init__(self, entry: DinnerSenseConfigEntry, key: str, offset: int) -> None:
         super().__init__(entry, key)
         self._offset = offset
@@ -43,7 +46,12 @@ class DinnerDaySensor(DinnerSenseEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, object]:
         dinner = self.dinner_for_offset(self._offset)
-        return self.dinner_attributes(dinner) if dinner else {}
+        if dinner is None:
+            return {}
+        return {
+            **self.dinner_attributes(dinner),
+            "recipe": self.planner.recipe_of(dinner),
+        }
 
 
 class DinnerScoreSensor(DinnerSenseEntity, SensorEntity):

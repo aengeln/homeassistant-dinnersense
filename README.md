@@ -70,7 +70,7 @@ For a household called **Amarula** (entity IDs follow your household name):
 
 | Entity | What it is |
 |---|---|
-| `sensor.amarula_dinner_today`, `sensor.amarula_dinner_tomorrow` | State is the cook's name. Attributes: `date`, `weekday`, `status`, `locked`, `cook_id`, `color`, `menu_title`, `dish_id`, `kind`, `note`, `going_out`, `at_home`, `cooking_needed` |
+| `sensor.amarula_dinner_today`, `sensor.amarula_dinner_tomorrow` | State is the cook's name. Attributes: `date`, `weekday`, `status`, `locked`, `cook_id`, `color`, `menu_title`, `dish_id`, `kind`, `note`, `going_out`, `at_home`, `cooking_needed`, `recipe` (the linked dish's recipe, or none; kept out of the recorder history) |
 | `select.amarula_dinner_day_0` … `_N-1` | The cook for each day (`_0` is today). **Choosing a cook performs a swap.** Same attributes as above |
 | `text.amarula_dinner_menu_day_0` … | The menu for each day. Type a dish name or alias to link it, or any text. Empty clears it |
 | `select.amarula_dinner_kind_day_0` … | What kind of dinner: Home, Eating out (everyone or any combination of cooks), Leftovers or No dinner. See [Eating out](#eating-out) |
@@ -348,6 +348,32 @@ tap_action:
 Add `custom:mushroom-title-card` and one template card per day in a vertical stack for a full week.
 These Mushroom examples have not been rendered in a browser while writing this README; adjust them to
 your Mushroom version if needed.
+
+### Cooking mode
+
+`sensor.<household>_dinner_today` (and `_tomorrow`) carry the linked dish's recipe in the `recipe`
+attribute: `servings`, `ingredients`, `steps`, `timers` and `notes`. A Markdown card that lists
+tonight's steps and timers:
+
+```yaml
+type: markdown
+content: >
+  {% set r = state_attr('sensor.amarula_dinner_today', 'recipe') %}
+  {% if r %}
+  ## {{ state_attr('sensor.amarula_dinner_today', 'menu_title') }}
+  {% for step in r.steps %}
+  {{ loop.index }}. {{ step }}
+  {% endfor %}
+  {% for t in r.timers %}
+  - **{{ t.name }}**: {{ t.minutes }} min (step {{ t.step }})
+  {% endfor %}
+  {% else %}No recipe for tonight.{% endif %}
+```
+
+To start a timer you need a Home Assistant `timer` helper. `timer.start` takes the duration in
+seconds, which a template gets from `(t.minutes * 60) | int`. The Markdown template above was checked
+against a running Home Assistant; wiring the timers to buttons depends on a templating card such as
+`custom:button-card` and hasn't been tried here.
 
 ### Cast to a Nest Hub
 

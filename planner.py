@@ -6,6 +6,7 @@ events and listener updates always see a fully applied state.
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -115,6 +116,12 @@ class Planner:
 
     def find_dish(self, title: str) -> Dish | None:
         return next((d for d in self.dishes.values() if d.matches(title)), None)
+
+    def recipe_of(self, dinner: Dinner | None) -> dict[str, Any] | None:
+        """A copy of the linked dish's recipe, or None."""
+        menu = dinner.menu if dinner else None
+        dish = self.dishes.get(menu.dish_id) if menu and menu.dish_id else None
+        return copy.deepcopy(dish.recipe) if dish and dish.recipe else None
 
     def menu_title(self, dinner: Dinner) -> str | None:
         menu = dinner.menu
