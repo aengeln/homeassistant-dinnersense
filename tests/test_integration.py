@@ -853,3 +853,44 @@ async def test_set_menu_going_out_by_name_and_validation(hass, entry, freezer) -
             {"date": "2026-03-04", "going_out": ["zed"]},
             blocking=True,
         )
+
+
+async def test_recipe_timers_roundtrip_through_services(hass, entry, freezer) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    await hass.services.async_call(
+        DOMAIN,
+        "create_dish",
+        {
+            "name": "Chicken noodles",
+            "recipe": {
+                "steps": ["Brown the chicken", "Boil water", "Cook noodles"],
+                "timers": [
+                    {"name": "Noodles", "minutes": 4, "step": 3},
+                    {"name": "Chicken", "minutes": 8, "step": 1},
+                ],
+            },
+        },
+        blocking=True,
+        return_response=True,
+    )
+    dishes = await hass.services.async_call(
+        DOMAIN, "list_dishes", {}, blocking=True, return_response=True
+    )
+    assert dishes["dishes"][0]["recipe"]["timers"] == [
+        {"name": "Noodles", "minutes": 4, "step": 3},
+        {"name": "Chicken", "minutes": 8, "step": 1},
+    ]
+    with pytest.raises(vol.Invalid):  # step 4 doesn't exist
+        await hass.services.async_call(
+            DOMAIN,
+            "update_dish",
+            {
+                "dish_id": "chicken_noodles",
+                "recipe": {
+                    "steps": ["Only one"],
+                    "timers": [{"name": "x", "minutes": 1, "step": 4}],
+                },
+            },
+            blocking=True,
+        )

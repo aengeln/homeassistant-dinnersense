@@ -93,23 +93,63 @@ MENU_SCHEMA = vol.Schema(
         vol.Optional("rating"): vol.All(vol.Coerce(int), vol.Range(min=1, max=5)),
     }
 )
-_RECIPE = vol.Schema(
+
+
+def _minutes(value: Any) -> int | float:
+    """A positive number of minutes; whole numbers stay ints (4, not 4.0)."""
+    number = float(value)
+    if number <= 0:
+        raise vol.Invalid("minutes must be greater than 0")
+    return int(number) if number.is_integer() else number
+
+
+_TIMER = vol.Schema(
     {
-        vol.Optional("ingredients"): [
-            vol.Schema(
-                {vol.Required("name"): cv.string, vol.Optional("quantity"): cv.string}
-            )
-        ],
-        vol.Optional("steps"): [cv.string],
-        vol.Optional("url"): cv.url,
-        vol.Optional("servings"): vol.Coerce(int),
-        vol.Optional("notes"): cv.string,
+        vol.Required("name"): cv.string,
+        vol.Required("minutes"): _minutes,
+        # 1-based number of the step the timer belongs to
+        vol.Optional("step"): vol.All(vol.Coerce(int), vol.Range(min=1)),
     }
+)
+
+
+def _check_timer_steps(recipe: dict[str, Any]) -> dict[str, Any]:
+    """A timer's step must be one of the recipe's steps."""
+    steps = len(recipe.get("steps") or [])
+    for timer in recipe.get("timers") or []:
+        step = timer.get("step")
+        if step is not None and step > steps:
+            raise vol.Invalid(
+                f"Timer '{timer['name']}' is for step {step}, "
+                f"but the recipe has {steps} step(s)"
+            )
+    return recipe
+
+
+RECIPE_SCHEMA = vol.All(
+    vol.Schema(
+        {
+            vol.Optional("ingredients"): [
+                vol.Schema(
+                    {
+                        vol.Required("name"): cv.string,
+                        vol.Optional("quantity"): cv.string,
+                    }
+                )
+            ],
+            vol.Optional("steps"): [cv.string],
+            vol.Optional("url"): cv.url,
+            vol.Optional("servings"): vol.Coerce(int),
+            vol.Optional("notes"): cv.string,
+            vol.Optional("timers"): [_TIMER],
+        }
+    ),
+    _check_timer_steps,
 )
 _DISH_FIELDS = {
     vol.Optional("aliases"): [cv.string],
     vol.Optional("tags"): [cv.string],
-    vol.Optional("recipe"): _RECIPE,
+    vol.Optional("recipe"): RECIPE_SCHEMA,
 }
 CREATE_DISH_SCHEMA = vol.Schema(
     {**_BASE, vol.Required("name"): cv.string, **_DISH_FIELDS}

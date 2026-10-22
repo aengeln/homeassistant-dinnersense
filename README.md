@@ -107,8 +107,15 @@ data:
     steps:
       - Brown the beef
       - Warm the tortillas
+    timers:
+      - { name: Beef, minutes: 8, step: 1 }
+      - { name: Tortillas, minutes: 1.5, step: 2 }
     url: https://example.com/tacos
 ```
+
+`timers` is an optional list. Each has a `name`, `minutes` (any number above 0) and an optional
+`step`: the **1-based** number of the step it belongs to, which must exist. The timers are stored
+and returned with the recipe (`list_dishes`); nothing starts them yet.
 
 Menus for days before you installed the integration create log-only records with no cook.
 

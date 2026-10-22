@@ -6,7 +6,7 @@ First release.
 
 - Rotating cook with a rolling plan (3–14 days), nightly roll, swap and reassign
 - Sensors for tonight and tomorrow, a select per day (choosing a cook swaps), and a read-only calendar
-- Menus for any day, past or future, with a dish library (aliases, tags, recipes)
+- Menus for any day, past or future, with a dish library (aliases, tags, recipes with timers)
 - Eating out for everyone or some cooks, as a free night; `cooking_needed` for reminders
 - Availability from calendars, date helpers, a binary sensor or manual ranges, with fairness debt
 - `dinnersense_conflict` event when a locked dinner's cook becomes unavailable
