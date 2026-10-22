@@ -106,6 +106,9 @@
     "select": {
       "dinner_day": {
         "name": "Dinner day {n}"
+      },
+      "dinner_kind_day": {
+        "name": "Dinner kind day {n}"
       }
     },
     "text": {
@@ -266,6 +269,10 @@
         "rating": {
           "name": "Rating",
           "description": ""
+        },
+        "going_out": {
+          "name": "Going out",
+          "description": "With kind eating_out: the cooks who go out (everyone if empty). Naming cooks implies eating out."
         }
       }
     },

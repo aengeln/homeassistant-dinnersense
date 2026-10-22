@@ -41,7 +41,15 @@ class DinnerSenseEntity(Entity):
     def dinner_attributes(self, dinner: Dinner) -> dict[str, object]:
         cook = self.planner.cook(dinner.cook)
         menu = dinner.menu
+        attendance = self.planner.attendance(dinner)
+
+        def names(ids: list[str]) -> list[str]:
+            return [c.name for i in ids if (c := self.planner.cook(i))]
+
         return {
+            "going_out": names(attendance["going_out"]),
+            "at_home": names(attendance["at_home"]),
+            "cooking_needed": attendance["cooking_needed"],
             "date": dinner.date.isoformat(),
             "weekday": dinner.date.strftime("%A"),
             "status": dinner.status,

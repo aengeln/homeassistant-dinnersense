@@ -413,6 +413,7 @@ class Planner:
         kind: str | None = None,
         note: str | None = None,
         rating: int | None = None,
+        going_out: list[str] | None = None,
     ) -> None:
         """Set, update or clear the menu of any day: past, today or future.
 
@@ -423,6 +424,14 @@ class Planner:
             raise PlannerError(f"Unknown kind: {kind}")
         if rating is not None and not 1 <= rating <= 5:
             raise PlannerError("rating must be 1-5")
+        if going_out is not None:
+            unknown = [c for c in going_out if self.cook(c) is None]
+            if unknown:
+                raise PlannerError(f"Unknown cook: {unknown[0]}")
+            if going_out and kind is None:
+                kind = "eating_out"  # naming who goes out implies eating out
+            if going_out and kind != "eating_out":
+                raise PlannerError("going_out only applies to kind eating_out")
         dinner = self._dinner_for_menu(day, today)
         before = _snapshot(dinner)
         title = (title or "").strip() or None
@@ -433,6 +442,7 @@ class Planner:
             and kind is None
             and note is None
             and rating is None
+            and going_out is None
         ):
             dinner.menu = None
         else:
@@ -446,6 +456,10 @@ class Planner:
                 self._link_title(menu, title)
             if kind is not None:
                 menu.kind = kind
+                if kind != "eating_out":
+                    menu.going_out = []
+            if going_out is not None:
+                menu.going_out = list(going_out)
             if note is not None:
                 menu.note = note or None
             if rating is not None:
@@ -457,6 +471,30 @@ class Planner:
         self._commit(
             [(EVENT_CHANGED, {"before": [before], "after": [_snapshot(dinner)]})]
         )
+
+    def attendance(self, dinner: Dinner) -> dict[str, Any]:
+        """Who is out, who stays home, and whether anyone has to cook.
+
+        Eating out is a free night: it uses the planned cook's turn either way.
+        A planned cook who stays home still has a normal turn, so cooking is
+        needed unless the planned cook is among those going out.
+        """
+        ids = [c.id for c in self.cooks]
+        kind = dinner.menu.kind if dinner.menu else "home"
+        out: list[str] = []
+        home: list[str] = []
+        if kind == "eating_out":
+            chosen = dinner.menu.going_out if dinner.menu else []
+            out = [c for c in ids if not chosen or c in chosen]
+            home = [c for c in ids if c not in out]
+            needed = dinner.cook in ids and dinner.cook not in out
+        else:
+            needed = kind == "home" and dinner.cook in ids
+        return {
+            "going_out": out,
+            "at_home": home,
+            "cooking_needed": needed and dinner.status == STATUS_PLANNED,
+        }
 
     def _link_title(self, menu: MenuEntry, title: str) -> None:
         """Link a known dish by name/alias, else keep the title as free text."""

@@ -232,3 +232,13 @@ def test_streak_respects_dinner_days():
         dinners, DISHES, COOKS, date(2026, 2, 28), 10, dinner_days=[0, 2, 4]
     )
     assert [(x["tag"], x["length"]) for x in s["streaks"]] == [("mexican", 3)]
+
+
+def test_restaurants_are_not_lapse_tips():
+    only = build(
+        d(-40, title="Pizza from Bella", kind="eating_out"),
+        d(-30, title="Pizza from Bella", kind="eating_out"),
+        d(-21, title="Pizza from Bella", kind="eating_out"),
+    )
+    assert rule_tips(stats(only)) == []
+    assert row(stats(only), "title:pizza from bella")["kind"] == "eating_out"

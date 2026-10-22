@@ -106,6 +106,9 @@
     "select": {
       "dinner_day": {
         "name": "Middag dag {n}"
+      },
+      "dinner_kind_day": {
+        "name": "Middagstyp dag {n}"
       }
     },
     "text": {
@@ -266,6 +269,10 @@
         "rating": {
           "name": "Betyg",
           "description": ""
+        },
+        "going_out": {
+          "name": "Äter ute",
+          "description": "Med typ eating_out: kockarna som äter ute (alla om tomt). Att ange kockar innebär att man äter ute."
         }
       }
     },

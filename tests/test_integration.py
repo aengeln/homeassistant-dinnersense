@@ -51,7 +51,10 @@ async def test_setup_creates_plan_and_entities(hass, entry, freezer) -> None:
     await _setup(hass, entry)
     assert hass.states.get("sensor.test_household_dinner_today").state == "Ann"
     assert hass.states.get("sensor.test_household_dinner_tomorrow").state == "Bob"
-    assert len(hass.states.async_entity_ids("select")) == 10
+    day_selects = [
+        e for e in hass.states.async_entity_ids("select") if "dinner_day_" in e
+    ]
+    assert len(day_selects) == 10
     day3 = hass.states.get("select.test_household_dinner_day_3")
     assert day3.state == "Ann"
     assert day3.attributes["date"] == "2026-03-05"
@@ -767,5 +770,86 @@ async def test_import_from_unknown_entity_is_an_error(hass, entry, freezer) -> N
             DOMAIN,
             "import_from_entity",
             {"entity_id": "input_text.nope"},
+            blocking=True,
+        )
+
+
+# -- eating out ------------------------------------------------------------------------
+
+
+async def test_kind_select_sets_eating_out_with_some_cooks(
+    hass, entry, freezer
+) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    kind = "select.test_household_dinner_kind_day_0"  # Ann cooks today
+    state = hass.states.get(kind)
+    assert state.state == "Home"
+    assert "Eating out: Ann, Bob" in state.attributes["options"]
+    assert state.attributes["cooking_needed"] is True
+
+    await hass.services.async_call(
+        "select",
+        "select_option",
+        {"entity_id": kind, "option": "Eating out: Ann, Bob"},
+        blocking=True,
+    )
+    state = hass.states.get(kind)
+    assert state.state == "Eating out: Ann, Bob"
+    assert state.attributes["going_out"] == ["Ann", "Bob"]
+    assert state.attributes["at_home"] == ["Cy"]
+    assert state.attributes["cooking_needed"] is False  # Ann cooks but is out
+    # The cook is unchanged: eating out is a free night.
+    assert hass.states.get("select.test_household_dinner_day_0").state == "Ann"
+    assert hass.states.get("sensor.test_household_dinner_today").state == "Ann"
+    assert (
+        hass.states.get("sensor.test_household_dinner_today").attributes[
+            "cooking_needed"
+        ]
+        is False
+    )
+
+    await hass.services.async_call(
+        "select", "select_option", {"entity_id": kind, "option": "Home"}, blocking=True
+    )
+    assert hass.states.get(kind).attributes["cooking_needed"] is True
+    assert hass.states.get(kind).attributes["going_out"] == []
+
+
+async def test_home_on_a_day_without_a_menu_changes_nothing(
+    hass, entry, freezer
+) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    events = async_capture_events(hass, "dinnersense_changed")
+    await hass.services.async_call(
+        "select",
+        "select_option",
+        {"entity_id": "select.test_household_dinner_kind_day_1", "option": "Home"},
+        blocking=True,
+    )
+    assert events == []
+
+
+async def test_set_menu_going_out_by_name_and_validation(hass, entry, freezer) -> None:
+    freezer.move_to(NOW)
+    await _setup(hass, entry)
+    await hass.services.async_call(
+        DOMAIN,
+        "set_menu",
+        {"date": "2026-03-04", "title": "Bella", "going_out": ["ann", "Cy"]},
+        blocking=True,
+    )
+    attrs = hass.states.get("select.test_household_dinner_kind_day_2").attributes
+    assert attrs["going_out"] == ["Ann", "Cy"] and attrs["kind"] == "eating_out"
+    assert (
+        hass.states.get("select.test_household_dinner_kind_day_2").state
+        == "Eating out: Ann, Cy"
+    )
+    with pytest.raises(HomeAssistantError, match="Unknown cook"):
+        await hass.services.async_call(
+            DOMAIN,
+            "set_menu",
+            {"date": "2026-03-04", "going_out": ["zed"]},
             blocking=True,
         )

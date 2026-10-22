@@ -73,6 +73,9 @@ set_menu:
         select:
           options: [home, eating_out, leftovers, skip]
           translation_key: menu_kind
+    going_out:
+      example: "Aengeln, Libertad"
+      selector: { text: { multiple: true } }
     note:
       selector: { text: }
     rating:

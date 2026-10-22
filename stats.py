@@ -90,12 +90,14 @@ def compute_stats(
     by_dish: dict[str, list[date]] = {}
     names: dict[str, str] = {}
     tags_of: dict[str, list[str]] = {}
+    last_kind: dict[str, str] = {}
     by_tag: dict[str, list[date]] = {}
     tag_dishes: dict[str, set[str]] = {}
     for dinner, key, name, tags in history:
         by_dish.setdefault(key, []).append(dinner.date)
         names[key] = name
         tags_of[key] = tags
+        last_kind[key] = dinner.menu.kind if dinner.menu else "home"
         for tag in tags:
             by_tag.setdefault(tag, []).append(dinner.date)
             tag_dishes.setdefault(tag, set()).add(key)
@@ -106,7 +108,13 @@ def compute_stats(
             tags_of.setdefault(dish.id, sorted({t.casefold() for t in dish.tags}))
 
     dish_rows = [
-        {"key": k, "name": names[k], "tags": tags_of[k], **_row(v, today)}
+        {
+            "key": k,
+            "name": names[k],
+            "tags": tags_of[k],
+            "kind": last_kind.get(k),
+            **_row(v, today),
+        }
         for k, v in by_dish.items()
     ]
     dish_rows.sort(

@@ -88,6 +88,7 @@ MENU_SCHEMA = vol.Schema(
         vol.Optional("title"): cv.string,
         vol.Optional("dish_id"): cv.string,
         vol.Optional("kind"): vol.In(MENU_KINDS),
+        vol.Optional("going_out"): [cv.string],
         vol.Optional("note"): cv.string,
         vol.Optional("rating"): vol.All(vol.Coerce(int), vol.Range(min=1, max=5)),
     }
@@ -198,6 +199,9 @@ def async_setup_services(hass: HomeAssistant) -> None:
             kind=d.get("kind"),
             note=d.get("note"),
             rating=d.get("rating"),
+            going_out=(
+                [_cook_id(p, c) for c in d["going_out"]] if "going_out" in d else None
+            ),
         )
 
     def create_dish(p: Planner, c: ServiceCall) -> ServiceResponse:

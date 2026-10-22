@@ -489,3 +489,92 @@ def test_import_respects_auto_create_dishes():
     h.planner.roll(TODAY)
     h.planner.import_menus({days(0): "Moose stew"}, TODAY)
     assert "moose_stew" in h.planner.dishes
+
+
+# -- eating out, with or without everyone -----------------------------------------
+
+
+def att(h, n):
+    return h.planner.attendance(h.planner.dinners[days(n)])
+
+
+def test_some_cooks_go_out_planned_cook_at_home_still_cooks():
+    h = Harness()
+    h.planner.roll(TODAY)
+    # Day 2 is Cy's. Ann and Bob go out; Cy stays home, normal turn.
+    h.planner.set_menu(days(2), TODAY, title="Bella", going_out=["ann", "bob"])
+    assert h.planner.dinners[days(2)].menu.kind == "eating_out"
+    assert att(h, 2) == {
+        "going_out": ["ann", "bob"],
+        "at_home": ["cy"],
+        "cooking_needed": True,
+    }
+
+
+def test_planned_cook_goes_out_so_nobody_has_to_cook():
+    h = Harness()
+    h.planner.roll(TODAY)
+    # Day 0 is Ann's, and Ann and Bob go out; Cy fends for themselves.
+    h.planner.set_menu(days(0), TODAY, title="Bella", going_out=["ann", "bob"])
+    assert att(h, 0) == {
+        "going_out": ["ann", "bob"],
+        "at_home": ["cy"],
+        "cooking_needed": False,
+    }
+
+
+def test_everyone_out_when_going_out_is_empty():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.set_menu(days(0), TODAY, title="Bella", kind="eating_out")
+    assert att(h, 0) == {
+        "going_out": ["ann", "bob", "cy"],
+        "at_home": [],
+        "cooking_needed": False,
+    }
+
+
+def test_cooking_needed_for_other_kinds_and_statuses():
+    h = Harness()
+    h.planner.roll(TODAY)
+    assert att(h, 0)["cooking_needed"] is True  # plain home dinner
+    h.planner.set_menu(days(0), TODAY, kind="leftovers")
+    assert att(h, 0) == {"going_out": [], "at_home": [], "cooking_needed": False}
+    h.planner.set_menu(days(1), TODAY, kind="skip")
+    assert att(h, 1)["cooking_needed"] is False
+    h.planner.skip(days(2))
+    assert att(h, 2)["cooking_needed"] is False
+
+
+def test_going_out_validation_and_kind_changes():
+    h = Harness()
+    h.planner.roll(TODAY)
+    with pytest.raises(planner_mod.PlannerError, match="Unknown cook"):
+        h.planner.set_menu(days(0), TODAY, going_out=["zed"])
+    with pytest.raises(planner_mod.PlannerError, match="only applies"):
+        h.planner.set_menu(days(0), TODAY, kind="home", going_out=["ann"])
+    h.planner.set_menu(days(0), TODAY, title="Bella", going_out=["ann"])
+    h.planner.set_menu(days(0), TODAY, kind="home")  # back home clears who went
+    assert h.planner.dinners[days(0)].menu.going_out == []
+    assert h.planner.dinners[days(0)].menu.title == "Bella"
+
+
+def test_going_out_survives_storage_roundtrip():
+    h = Harness()
+    h.planner.roll(TODAY)
+    h.planner.set_menu(days(0), TODAY, going_out=["ann", "cy"])
+    d = h.planner.dinners[days(0)]
+    assert models.Dinner.from_dict(d.to_dict()) == d
+
+
+def test_eating_out_never_changes_the_rotation_and_is_a_turn():
+    h = Harness()
+    h.planner.roll(TODAY)
+    before = {d: v.cook for d, v in h.planner.dinners.items()}
+    h.planner.set_menu(days(0), TODAY, title="Bella", going_out=["bob"])
+    h.planner.set_menu(days(1), TODAY, kind="eating_out")
+    assert {d: v.cook for d, v in h.planner.dinners.items()} == before
+    h.planner.roll(days(2))  # days 0 and 1 become done
+    assert h.planner.cook_stats("ann", days(2))["cooked_30"] == 1
+    assert h.planner.cook_stats("bob", days(2))["cooked_30"] == 1
+    assert h.planner.debt == {}

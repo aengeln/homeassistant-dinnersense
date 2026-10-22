@@ -141,7 +141,9 @@ def rule_tips(stats: dict[str, Any], language: str = "en") -> list[dict[str, str
         (
             i
             for i in items
-            if i["days_since"] >= LAPSE_MIN_DAYS and i["count_90"] >= LAPSE_MIN_COUNT_90
+            if i["days_since"] >= LAPSE_MIN_DAYS
+            and i["count_90"] >= LAPSE_MIN_COUNT_90
+            and i.get("kind") != "eating_out"  # "no pizza from Bella" is not a tip
         ),
         key=lambda i: (-i["days_since"], i["name"]),
     )

@@ -38,6 +38,8 @@ class MenuEntry:
     kind: str = "home"  # home | eating_out | leftovers | skip
     rating: int | None = None
     note: str | None = None
+    # Cook ids who go out when kind is eating_out; empty means everyone.
+    going_out: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return dict(self.__dict__)

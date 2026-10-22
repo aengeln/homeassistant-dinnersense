@@ -5,6 +5,7 @@ A Home Assistant integration for household dinner planning:
 - a **rotating cook** with a rolling plan 3–14 days ahead, regenerated nightly
 - **easy swaps**: pick another cook for a day and it swaps with their next day
 - **menus** for any day, past, today or future, from a one-line title to a full recipe
+- **eating out**, for everyone or only some of the cooks, as a free night
 - a **dish library** with aliases, tags and optional recipes
 - a **meal log** kept forever, so you can look back
 - **tips** such as "No Burgers for 21 days" or "Friday has no menu yet", optionally phrased by an LLM
@@ -69,9 +70,10 @@ For a household called **Amarula** (entity IDs follow your household name):
 
 | Entity | What it is |
 |---|---|
-| `sensor.amarula_dinner_today`, `sensor.amarula_dinner_tomorrow` | State is the cook's name. Attributes: `date`, `weekday`, `status`, `locked`, `cook_id`, `color`, `menu_title`, `dish_id`, `kind`, `note` |
+| `sensor.amarula_dinner_today`, `sensor.amarula_dinner_tomorrow` | State is the cook's name. Attributes: `date`, `weekday`, `status`, `locked`, `cook_id`, `color`, `menu_title`, `dish_id`, `kind`, `note`, `going_out`, `at_home`, `cooking_needed` |
 | `select.amarula_dinner_day_0` … `_N-1` | The cook for each day (`_0` is today). **Choosing a cook performs a swap.** Same attributes as above |
 | `text.amarula_dinner_menu_day_0` … | The menu for each day. Type a dish name or alias to link it, or any text. Empty clears it |
+| `select.amarula_dinner_kind_day_0` … | What kind of dinner: Home, Eating out (everyone or any combination of cooks), Leftovers or No dinner. See [Eating out](#eating-out) |
 | `calendar.amarula_dinner` | Past and planned dinners as all-day events ("Ann — Tacos"). Read-only |
 | `sensor.amarula_dinner_score_<cook>` | Dinners cooked in the last 30 days. Attributes: `cooked_90`, `swaps_given`, `swaps_taken`, `debt` |
 | `sensor.amarula_dinner_tips` | The first tip as state. Attributes: `tips`, `source` (`rules` or `llm`), `generated_at` |
@@ -109,6 +111,39 @@ data:
 ```
 
 Menus for days before you installed the integration create log-only records with no cook.
+
+## Eating out
+
+Mark a day with the kind select (or `set_menu` with `kind: eating_out`). The select lists every
+combination of cooks, for example *Eating out: everyone* or *Eating out: Aengeln, Libertad*. With
+more than four cooks only "everyone" is offered; use the service's `going_out` for the rest.
+
+```yaml
+action: dinnersense.set_menu
+data:
+  date: "2026-03-06"
+  title: Pizza from Bella
+  going_out: [Aengeln, Libertad]   # implies kind: eating_out; leave out for everyone
+```
+
+- **Eating out is a free night.** It uses the planned cook's turn, so the rotation never shifts and no
+  debt is created. It's fair over time.
+- If the planned cook **stays home** while others go out, it is still their normal turn.
+- The day exposes `going_out` and `at_home` (names) and **`cooking_needed`**: true only when the
+  planned cook is home on a normal dinner. It is false for leftovers, no dinner, skipped days, and
+  when the planned cook is out. Use it to skip reminders:
+
+```yaml
+conditions:
+  - condition: state
+    entity_id: sensor.amarula_dinner_today
+    attribute: cooking_needed
+    state: true
+```
+
+- Cooks who aren't going and aren't the planned cook fend for themselves; nothing is tracked for
+  them, and household members who don't cook aren't modelled.
+- Restaurants never produce "No X for N days" tips.
 
 ## Availability
 
@@ -166,7 +201,7 @@ given by name or id.
 | `regenerate` | Rebuild unlocked future dinners (menus are kept) |
 | `get_plan` (`start?`, `end?`) | *Response*: planned dinners |
 | `get_history` (`start`, `end`) | *Response*: dinners up to today |
-| `set_menu` (`date`, `title?`, `dish_id?`, `kind?`, `note?`, `rating?`) | Set or clear a menu, any date |
+| `set_menu` (`date`, `title?`, `dish_id?`, `kind?`, `going_out?`, `note?`, `rating?`) | Set or clear a menu, any date |
 | `create_dish`, `update_dish`, `delete_dish`, `list_dishes` | The dish library |
 | `set_unavailable` (`cook`, `start`, `end`), `clear_unavailable` (`cook`, `start?`, `end?`) | Manual away ranges |
 | `get_stats` (`period?`) | *Response*: days since each dish and tag, frequencies, streaks, unplanned days |
@@ -212,6 +247,11 @@ automation:
     triggers:
       - trigger: time
         at: "14:00:00"
+    conditions:
+      - condition: state
+        entity_id: sensor.amarula_dinner_today
+        attribute: cooking_needed
+        state: true
     actions:
       - action: notify.notify
         data:
