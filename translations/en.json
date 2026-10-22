@@ -1,0 +1,160 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Dinner Sense",
+        "description": "Create a household. List the cooks in rotation order, separated by commas.",
+        "data": {
+          "name": "Household name",
+          "cook_names": "Cooks"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "This household is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Dinner Sense settings",
+        "data": {
+          "cook_names": "Cooks (rotation order, comma separated)",
+          "horizon_days": "Days planned ahead",
+          "roll_time": "Nightly roll time",
+          "dinner_days": "Days with a planned dinner",
+          "menu_follows_cook": "Menu follows the cook when swapping",
+          "unconfirmed_past": "Unconfirmed past dinners count as"
+        }
+      }
+    }
+  },
+  "selector": {
+    "weekday": {
+      "options": {
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday",
+        "sun": "Sunday"
+      }
+    },
+    "unconfirmed_past": {
+      "options": {
+        "done": "Done",
+        "missed": "Missed"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "dinner_today": {
+        "name": "Dinner today"
+      },
+      "dinner_tomorrow": {
+        "name": "Dinner tomorrow"
+      }
+    },
+    "select": {
+      "dinner_day": {
+        "name": "Dinner day {n}"
+      }
+    }
+  },
+  "services": {
+    "swap": {
+      "name": "Swap",
+      "description": "Give a day to another cook and hand that cook's next day to the current cook.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
+          "description": ""
+        },
+        "date": {
+          "name": "Date",
+          "description": ""
+        },
+        "cook": {
+          "name": "Cook",
+          "description": ""
+        }
+      }
+    },
+    "reassign": {
+      "name": "Reassign",
+      "description": "Change the cook of one day only, past days included.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
+          "description": ""
+        },
+        "date": {
+          "name": "Date",
+          "description": ""
+        },
+        "cook": {
+          "name": "Cook",
+          "description": ""
+        }
+      }
+    },
+    "skip": {
+      "name": "Skip",
+      "description": "Mark a day's dinner as skipped.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
+          "description": ""
+        },
+        "date": {
+          "name": "Date",
+          "description": ""
+        }
+      }
+    },
+    "complete": {
+      "name": "Complete",
+      "description": "Mark a day's dinner as done.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
+          "description": ""
+        },
+        "date": {
+          "name": "Date",
+          "description": ""
+        }
+      }
+    },
+    "regenerate": {
+      "name": "Regenerate",
+      "description": "Rebuild unlocked future dinners.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
+          "description": ""
+        }
+      }
+    },
+    "get_plan": {
+      "name": "Get plan",
+      "description": "Return planned dinners in a date range.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Household",
+          "description": ""
+        },
+        "start": {
+          "name": "Start",
+          "description": ""
+        },
+        "end": {
+          "name": "End",
+          "description": ""
+        }
+      }
+    }
+  }
+}

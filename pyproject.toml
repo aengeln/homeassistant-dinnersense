@@ -1,0 +1,22 @@
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["rotation"]
+follow_imports = "silent"
+
+[tool.ruff.lint.isort]
+known-first-party = ["homeassistant", "custom_components"]
+
+[[tool.mypy.overrides]]
+module = ["homeassistant.*", "voluptuous"]
+ignore_missing_imports = true

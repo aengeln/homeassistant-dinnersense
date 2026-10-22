@@ -1,0 +1,48 @@
+swap:
+  fields:
+    config_entry_id:
+      selector: { config_entry: { integration: dinnersense } }
+    date:
+      required: true
+      selector: { date: }
+    cook:
+      required: true
+      example: "Libertad"
+      selector: { text: }
+reassign:
+  fields:
+    config_entry_id:
+      selector: { config_entry: { integration: dinnersense } }
+    date:
+      required: true
+      selector: { date: }
+    cook:
+      required: true
+      example: "Libertad"
+      selector: { text: }
+skip:
+  fields:
+    config_entry_id:
+      selector: { config_entry: { integration: dinnersense } }
+    date:
+      required: true
+      selector: { date: }
+complete:
+  fields:
+    config_entry_id:
+      selector: { config_entry: { integration: dinnersense } }
+    date:
+      required: true
+      selector: { date: }
+regenerate:
+  fields:
+    config_entry_id:
+      selector: { config_entry: { integration: dinnersense } }
+get_plan:
+  fields:
+    config_entry_id:
+      selector: { config_entry: { integration: dinnersense } }
+    start:
+      selector: { date: }
+    end:
+      selector: { date: }

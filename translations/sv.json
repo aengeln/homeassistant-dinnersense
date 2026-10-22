@@ -1,0 +1,160 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Dinner Sense",
+        "description": "Skapa ett hushåll. Ange kockarna i turordning, separerade med komma.",
+        "data": {
+          "name": "Hushållets namn",
+          "cook_names": "Kockar"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "Det här hushållet är redan konfigurerat."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Inställningar för Dinner Sense",
+        "data": {
+          "cook_names": "Kockar (turordning, separerade med komma)",
+          "horizon_days": "Dagar planerade framåt",
+          "roll_time": "Tid för nattlig rullning",
+          "dinner_days": "Dagar med planerad middag",
+          "menu_follows_cook": "Menyn följer kocken vid byte",
+          "unconfirmed_past": "Obekräftade tidigare middagar räknas som"
+        }
+      }
+    }
+  },
+  "selector": {
+    "weekday": {
+      "options": {
+        "mon": "Måndag",
+        "tue": "Tisdag",
+        "wed": "Onsdag",
+        "thu": "Torsdag",
+        "fri": "Fredag",
+        "sat": "Lördag",
+        "sun": "Söndag"
+      }
+    },
+    "unconfirmed_past": {
+      "options": {
+        "done": "Gjort",
+        "missed": "Missad"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "dinner_today": {
+        "name": "Middag idag"
+      },
+      "dinner_tomorrow": {
+        "name": "Middag imorgon"
+      }
+    },
+    "select": {
+      "dinner_day": {
+        "name": "Middag dag {n}"
+      }
+    }
+  },
+  "services": {
+    "swap": {
+      "name": "Byt",
+      "description": "Ge en dag till en annan kock och ge den kockens nästa dag till nuvarande kock.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
+          "description": ""
+        },
+        "date": {
+          "name": "Datum",
+          "description": ""
+        },
+        "cook": {
+          "name": "Kock",
+          "description": ""
+        }
+      }
+    },
+    "reassign": {
+      "name": "Tilldela om",
+      "description": "Ändra kock för en enda dag, även tidigare dagar.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
+          "description": ""
+        },
+        "date": {
+          "name": "Datum",
+          "description": ""
+        },
+        "cook": {
+          "name": "Kock",
+          "description": ""
+        }
+      }
+    },
+    "skip": {
+      "name": "Hoppa över",
+      "description": "Markera dagens middag som överhoppad.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
+          "description": ""
+        },
+        "date": {
+          "name": "Datum",
+          "description": ""
+        }
+      }
+    },
+    "complete": {
+      "name": "Klar",
+      "description": "Markera dagens middag som gjord.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
+          "description": ""
+        },
+        "date": {
+          "name": "Datum",
+          "description": ""
+        }
+      }
+    },
+    "regenerate": {
+      "name": "Generera om",
+      "description": "Bygg om olåsta kommande middagar.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
+          "description": ""
+        }
+      }
+    },
+    "get_plan": {
+      "name": "Hämta plan",
+      "description": "Returnera planerade middagar i ett datumintervall.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Hushåll",
+          "description": ""
+        },
+        "start": {
+          "name": "Start",
+          "description": ""
+        },
+        "end": {
+          "name": "Slut",
+          "description": ""
+        }
+      }
+    }
+  }
+}
